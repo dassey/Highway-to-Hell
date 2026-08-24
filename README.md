@@ -14,6 +14,11 @@ and tapping a road label isolates that road nationwide.
 | --- | --- |
 | ![Street level](docs/screenshot-street.png) | ![Mobile](docs/screenshot-mobile.png) |
 
+Pin a spot — search a place or use your location — and everything scopes to a
+1–10&nbsp;mile ring around it:
+
+![Radius ring around a pinned location](docs/screenshot-pin.png)
+
 ## How it works
 
 Pure static site — no backend, no build step, no API keys. Ready for GitHub Pages.
@@ -31,8 +36,18 @@ Pure static site — no backend, no build step, no API keys. Ready for GitHub Pa
   viewport's crashes are re-aggregated per road and the top roads get a
   `deaths\crashes` label anchored to the crash nearest the group's centroid, so
   labels sit on the road itself.
-- **Search** — type a road (`I-40`, `US-1`, `SR-99`) to see its national toll and
-  isolate its crashes on the map. Year chips re-filter everything live.
+- **Your corner** — the map is built to be pointed at a place. Search a town or
+  address (open [Photon](https://photon.komoot.io) geocoder, no key) or hit the
+  crosshair to use device location: a draggable pin drops with a 1/3/5/10-mile
+  ring, the stats and every road label re-scope to what happened inside the
+  ring, and crashes outside it dim to context. The pin survives reloads
+  (localStorage) and lives in the URL (`?p=lat,lon&r=5`), so a spot can be
+  shared as a link. Device location is only used to move the map; place-search
+  queries go to photon.komoot.io.
+- **Search** — the same box finds roads in the dataset (`I-40`, `US-1`,
+  `SR-99`): pick one to see its national toll and isolate its crashes; with a
+  pin active, road numbers scope to the ring. Year chips re-filter everything
+  live.
 
 ## Deploying on GitHub Pages
 
