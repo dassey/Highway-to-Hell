@@ -2,7 +2,8 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [main, "claude/fars-fatality-map-3xho03"]
+    branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -11,22 +12,32 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  group: pages-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # packs the site into a Pages artifact — runs on PRs too, as a green-check
+  # validation that the static bundle is deployable
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: "."
+
+  # actual deployment happens only from main; the github-pages environment
+  # rejects other branches by design
   deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: build
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
         with:
           enablement: true
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: "."
       - id: deployment
         uses: actions/deploy-pages@v4
