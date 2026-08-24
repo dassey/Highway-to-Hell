@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Highway to Hell — U.S. road deaths, mapped</title>
+<meta name="description" content="Every fatal crash in America, 2022–2024. Each road carries its toll: deaths\crashes, straight from NHTSA's Fatality Analysis Reporting System.">
+<meta name="theme-color" content="#0a0a0c">
+<meta property="og:title" content="Highway to Hell">
+<meta property="og:description" content="122,450 deaths on American roads, 2022–2024. Zoom in — every road shows its toll.">
+<meta property="og:type" content="website">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="assets/fonts/fonts.css">
+<link rel="stylesheet" href="assets/vendor/maplibre-gl.css">
+<link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+
+<div id="map"></div>
+<div class="vignette" aria-hidden="true"></div>
+
+<!-- top scrim / header -->
+<header class="topbar">
+  <div class="brand" id="brand">
+    <svg class="mark" viewBox="0 0 48 48" aria-hidden="true">
+      <path class="shield" d="M24 3 L42 9 C42 24 36 37 24 45 C12 37 6 24 6 9 Z"/>
+      <path class="bolt" d="M27 10 L17 27 L23 27 L20 39 L32 21 L25.5 21 L29.5 10 Z"/>
+    </svg>
+    <div class="brand-text">
+      <h1>Highway&nbsp;to&nbsp;Hell</h1>
+      <p class="tag">U.S. ROAD DEATHS · 2022–2024 · <span class="tag-num">DEATHS\CRASHES</span></p>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="years" id="years" role="group" aria-label="Years"></div>
+    <div class="search-wrap" id="search-wrap">
+      <input id="search" type="search" placeholder="Hunt a road… I-40, US-1, SR-99" autocomplete="off" spellcheck="false" aria-label="Search for a road">
+      <div class="suggest" id="suggest" hidden></div>
+    </div>
+    <button class="icon-btn" id="about-btn" aria-label="About this map" title="About this map">?</button>
+  </div>
+</header>
+
+<!-- selected road banner -->
+<div class="road-banner" id="road-banner" hidden>
+  <div class="rb-body">
+    <span class="rb-name" id="rb-name"></span>
+    <span class="rb-nums" id="rb-nums"></span>
+    <span class="rb-sub" id="rb-sub"></span>
+  </div>
+  <button class="rb-clear" id="rb-clear" aria-label="Clear road filter">×</button>
+</div>
+
+<!-- viewport stats -->
+<aside class="stats" id="stats" aria-live="polite">
+  <div class="stats-kicker">IN THIS VIEW</div>
+  <div class="stats-nums"><b id="stat-d">—</b><i>\</i><span id="stat-c">—</span></div>
+  <div class="stats-sub" id="stats-sub">deaths\crashes · zoom in for per-road counts</div>
+  <div class="stats-attrib">©&nbsp;<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>
+    ©&nbsp;<a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a> ·
+    <a href="https://www.nhtsa.gov/research-data/fatality-analysis-reporting-system-fars" target="_blank" rel="noopener">NHTSA&nbsp;FARS</a></div>
+</aside>
+
+<!-- about modal -->
+<div class="modal" id="modal" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <button class="modal-close" id="modal-close" aria-label="Close">×</button>
+    <h2 id="modal-title">Highway to Hell</h2>
+    <p class="modal-lede"><b id="m-deaths">—</b> people were killed in <b id="m-crashes">—</b> crashes
+      on American roads from <span id="m-years">—</span>. This map plots every one of them.</p>
+
+    <h3>Reading the map</h3>
+    <ul>
+      <li><span class="k k-heat"></span><div>Zoomed out, the glow is a heat field of deaths.</div></li>
+      <li><span class="k k-cluster">86</span><div>Mid-zoom circles total the <b>deaths</b> inside them. Tap to dive.</div></li>
+      <li><span class="k k-road">I-40<br>212\188</span><div>Zoomed in, every named road wears its toll:
+        <b class="ember">deaths</b>\<b>crashes</b> for that road in the current view. Tap a label to isolate the road.</div></li>
+      <li><span class="k k-dot"></span><div>Single dots are individual crashes, sized by lives lost. Tap for details.</div></li>
+    </ul>
+
+    <h3>The data</h3>
+    <p>Crash records come from NHTSA's <a href="https://www.nhtsa.gov/research-data/fatality-analysis-reporting-system-fars"
+      target="_blank" rel="noopener">Fatality Analysis Reporting System (FARS)</a> — the federal census of every
+      motor-vehicle crash on a public road that kills someone within 30&nbsp;days. Roads are grouped by the
+      trafficway identifier (<code>TWAY_ID</code>) states report, so the same highway can appear under more than one
+      name, and a road named in two states counts each state's stretch. <span id="m-dropped">—</span> crashes with
+      unusable coordinates are not shown. Data is public domain; this site is not affiliated with NHTSA or USDOT.</p>
+
+    <p class="modal-foot">Basemap © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>
+      contributors, © <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a> ·
+      rendered with <a href="https://maplibre.org" target="_blank" rel="noopener">MapLibre&nbsp;GL</a> ·
+      dataset built <span id="m-built">—</span></p>
+
+    <p class="modal-coda">Every number here was somebody. Drive like it.</p>
+  </div>
+</div>
+
+<!-- loader -->
+<div class="loader" id="loader">
+  <svg class="mark big" viewBox="0 0 48 48" aria-hidden="true">
+    <path class="shield" d="M24 3 L42 9 C42 24 36 37 24 45 C12 37 6 24 6 9 Z"/>
+    <path class="bolt" d="M27 10 L17 27 L23 27 L20 39 L32 21 L25.5 21 L29.5 10 Z"/>
+  </svg>
+  <div class="loader-title">HIGHWAY TO HELL</div>
+  <div class="road-line" aria-hidden="true"></div>
+  <div class="loader-status" id="loader-status">pulling crash records…</div>
+</div>
+
+<script src="assets/vendor/maplibre-gl.js"></script>
+<script src="assets/js/app.js"></script>
+</body>
+</html>
