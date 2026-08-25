@@ -422,26 +422,6 @@ function addLayers() {
   });
 
   map.addLayer({
-    id: 'pt-count',
-    type: 'symbol',
-    source: 'crashes',
-    filter: ['all', ['!', ['has', 'point_count']],
-      ['any', ['>=', ['get', 'f'], 2], ['>=', ['zoom'], 13.5]]],
-    minzoom: 10.5,
-    layout: {
-      'text-field': ['to-string', ['get', 'f']],
-      'text-font': FONT_NUM,
-      'text-size': 10.5,
-      'text-allow-overlap': true,
-    },
-    paint: {
-      'text-color': T.numText,
-      'text-halo-color': T.numHalo,
-      'text-halo-width': 1,
-    },
-  });
-
-  map.addLayer({
     id: 'roads',
     type: 'symbol',
     source: 'roadlabels',
@@ -693,8 +673,6 @@ function applyPin(pin, { fly = true } = {}) {
 
   S.map.setFilter('pts', ['all', ['!', ['has', 'point_count']], ['within', poly]]);
   S.map.setFilter('pts-out', ['all', ['!', ['has', 'point_count']], ['!', ['within', poly]]]);
-  S.map.setFilter('pt-count', ['all', ['!', ['has', 'point_count']], ['within', poly],
-    ['any', ['>=', ['get', 'f'], 2], ['>=', ['zoom'], 13.5]]]);
 
   if (!S.marker) {
     const el = document.createElement('div');
@@ -735,8 +713,6 @@ function clearPin() {
   S.map.getSource('pin-ring').setData({ type: 'FeatureCollection', features: [] });
   S.map.setFilter('pts', ['!', ['has', 'point_count']]);
   S.map.setFilter('pts-out', ['boolean', false]);
-  S.map.setFilter('pt-count', ['all', ['!', ['has', 'point_count']],
-    ['any', ['>=', ['get', 'f'], 2], ['>=', ['zoom'], 13.5]]]);
   $('stats').classList.remove('pinned');
   $('pin-clear').hidden = true;
   $('radius-row').hidden = true;
