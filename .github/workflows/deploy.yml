@@ -16,8 +16,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # packs the site into a Pages artifact — runs on PRs too, as a green-check
-  # validation that the static bundle is deployable
   build:
     runs-on: ubuntu-latest
     steps:
@@ -26,8 +24,6 @@ jobs:
         with:
           path: "."
 
-  # actual deployment happens only from main; the github-pages environment
-  # rejects other branches by design
   deploy:
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     needs: build
