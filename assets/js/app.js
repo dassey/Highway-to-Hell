@@ -295,19 +295,7 @@ function addLayers() {
 
   const initial = { type: 'FeatureCollection', features: activeFeatures() };
 
-  map.addSource('crashes', {
-    type: 'geojson',
-    data: initial,
-    cluster: true,
-    clusterRadius: 50,
-    clusterMaxZoom: 9,
-    clusterProperties: { deaths: ['+', ['get', 'f']] },
-  });
-
-  map.addSource('roadlabels', {
-    type: 'geojson',
-    data: { type: 'FeatureCollection', features: [] },
-  });
+  map.addSource('crashes', { type: 'geojson', data: initial });
 
   map.addSource('pin-ring', {
     type: 'geojson',
@@ -337,42 +325,29 @@ function addLayers() {
   });
 
   map.addLayer({
-    id: 'clusters',
-    type: 'circle',
+    id: 'heat',
+    type: 'heatmap',
     source: 'crashes',
-    filter: ['has', 'point_count'],
+    maxzoom: 9,
     paint: {
-      'circle-color': ['interpolate', ['linear'], ['get', 'deaths'],
-        10, '#6e1310', 100, '#a11a12', 1000, '#d43413', 12000, '#ff5a1f', 90000, '#ff9430'],
-      'circle-radius': ['interpolate', ['linear'], ['get', 'deaths'],
-        2, 12, 60, 16, 600, 21, 6000, 27, 40000, 34, 250000, 44],
-      'circle-stroke-width': 2,
-      'circle-stroke-color': T.clusterStroke,
-      'circle-opacity': 0.92,
+      'heatmap-weight': ['interpolate', ['linear'], ['get', 'f'],
+        1, 0.006, 4, 0.02, 10, 0.05],
+      'heatmap-intensity': ['interpolate', ['linear'], ['zoom'],
+        2, 0.5, 4, 0.7, 6, 1.0, 8, 1.4],
+      'heatmap-radius': ['interpolate', ['linear'], ['zoom'],
+        2, 9, 4, 17, 6, 26, 8, 36, 9, 44],
+      'heatmap-opacity': ['interpolate', ['linear'], ['zoom'],
+        6.5, 0.95, 8.6, 0],
+      'heatmap-color': ['interpolate', ['linear'], ['heatmap-density'],
+        0, 'rgba(0,0,0,0)',
+        0.1, 'rgba(58,5,5,0.5)',
+        0.3, '#7a0e0e',
+        0.55, '#c22815',
+        0.78, '#ff5a1f',
+        0.93, '#ffa542',
+        1, '#ffe0a3'],
     },
   }, under);
-
-  map.addLayer({
-    id: 'cluster-count',
-    type: 'symbol',
-    source: 'crashes',
-    filter: ['has', 'point_count'],
-    layout: {
-      'text-field': ['case',
-        ['>=', ['get', 'deaths'], 10000],
-        ['concat', ['to-string', ['round', ['/', ['get', 'deaths'], 1000]]], 'k'],
-        ['number-format', ['get', 'deaths'], {}]],
-      'text-font': FONT_NUM,
-      'text-size': ['interpolate', ['linear'], ['get', 'deaths'],
-        5, 11.5, 600, 13, 6000, 14.5, 90000, 17],
-      'text-allow-overlap': true,
-    },
-    paint: {
-      'text-color': T.numText,
-      'text-halo-color': T.numHalo,
-      'text-halo-width': 1,
-    },
-  });
 
   map.addLayer({
     id: 'pts-out',
@@ -394,7 +369,6 @@ function addLayers() {
     id: 'pts',
     type: 'circle',
     source: 'crashes',
-    filter: ['!', ['has', 'point_count']],
     paint: {
       'circle-color': ['interpolate', ['linear'], ['get', 'f'],
         1, '#b3220f', 2, '#e0401a', 4, '#ff702a', 8, '#ffa542'],
@@ -405,7 +379,8 @@ function addLayers() {
         15, ['+', 5, ['*', 2, ['get', 'f']]]],
       'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 7, 0.4, 11, 1.4],
       'circle-stroke-color': T.ptStroke,
-      'circle-opacity': 0.92,
+      'circle-opacity': ['interpolate', ['linear'], ['zoom'], 6.8, 0, 8.8, 0.92],
+      'circle-stroke-opacity': ['interpolate', ['linear'], ['zoom'], 6.8, 0, 8.8, 1],
     },
   }, under);
 
@@ -421,57 +396,19 @@ function addLayers() {
     },
   });
 
-  map.addLayer({
-    id: 'roads',
-    type: 'symbol',
-    source: 'roadlabels',
-    minzoom: ROAD_LABEL_MINZOOM,
-    layout: {
-      'text-field': ['format',
-        ['get', 'name'], { 'text-font': ['literal', FONT_TEXT], 'font-scale': 0.78, 'text-color': T.labelText },
-        '\n', {},
-        ['get', 'label'], { 'text-font': ['literal', FONT_NUM], 'font-scale': 1.06, 'text-color': '#ff8a3d' },
-      ],
-      'text-font': FONT_NUM,
-      'text-size': ['interpolate', ['linear'], ['zoom'], 6.6, 12.5, 10, 14, 14, 16],
-      'text-line-height': 1.15,
-      'symbol-sort-key': ['get', 'order'],
-      'text-padding': 6,
-      'text-offset': [0, -1.9],
-    },
-    paint: {
-      'text-halo-color': T.labelHalo,
-      'text-halo-width': 1.5,
-    },
-  });
 }
 
 function initInteractions() {
   const map = S.map;
 
   map.on('click', (e) => {
-    if (!S.layersReady) return;
-    const layers = ['pts', 'clusters', 'roads'].filter((l) => map.getLayer(l));
-    const fs = map.queryRenderedFeatures(e.point, { layers });
-    if (!fs.length) return;
-    const pt = fs.find((f) => f.layer.id === 'pts');
-    if (pt) {
-      openDetail(pt.properties, pt.geometry.coordinates);
-      return;
-    }
-    const cl = fs.find((f) => f.layer.id === 'clusters');
-    if (cl) {
-      drillInto(cl);
-      return;
-    }
-    const rd = fs.find((f) => f.layer.id === 'roads');
-    if (rd && rd.properties.rid > 0) selectRoad(rd.properties.rid);
+    if (!S.layersReady || !map.getLayer('pts')) return;
+    const fs = map.queryRenderedFeatures(e.point, { layers: ['pts'] });
+    if (fs.length) openDetail(fs[0].properties, fs[0].geometry.coordinates);
   });
 
-  for (const layer of ['clusters', 'pts', 'roads']) {
-    map.on('mouseenter', layer, () => { map.getCanvas().style.cursor = 'pointer'; });
-    map.on('mouseleave', layer, () => { map.getCanvas().style.cursor = ''; });
-  }
+  map.on('mouseenter', 'pts', () => { map.getCanvas().style.cursor = 'pointer'; });
+  map.on('mouseleave', 'pts', () => { map.getCanvas().style.cursor = ''; });
 }
 
 function camNow() {
