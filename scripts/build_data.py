@@ -4,6 +4,7 @@ import csv
 import datetime
 import io
 import json
+import math
 import os
 import re
 import sys
@@ -430,13 +431,132 @@ def build_year(year, zf, harvest, points, shards_dir, states, state_idx, stfips,
     return kept, len(shards), total_bytes
 
 
+GRID_RES = 0.1
+
+
+def write_json(path, obj):
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(obj, f, ensure_ascii=False, separators=(",", ":"))
+    return os.path.getsize(path)
+
+
+def write_outputs(data, data_dir):
+    meta = data["meta"]
+    years = meta["years"]
+    lat, lon, f, y, r, s, c = (data[k] for k in ("lat", "lon", "f", "y", "r", "s", "c"))
+    roads = data["roads"]
+    states = data["states"]
+    stfips = data["stfips"]
+    n = len(lat)
+
+    bins = {}
+    cells = {}
+    for i in range(n):
+        bx = math.floor(lon[i] / 1e5 / GRID_RES)
+        by = math.floor(lat[i] / 1e5 / GRID_RES)
+        bi = bins.setdefault((bx, by), len(bins))
+        key = (bi, y[i])
+        e = cells.get(key)
+        if e is None:
+            cells[key] = [f[i], 1]
+        else:
+            e[0] += f[i]
+            e[1] += 1
+
+    order = sorted(bins, key=lambda k: (k[0], k[1]))
+    remap = {bins[k]: i for i, k in enumerate(order)}
+    cell_rows = sorted(((remap[bi], yi, e[0], e[1]) for (bi, yi), e in cells.items()))
+
+    boot = {
+        "meta": dict(meta, packPattern="data/s/{fips}.json"),
+        "states": states,
+        "stfips": stfips,
+        "grid": {
+            "res": GRID_RES,
+            "bx": [k[0] for k in order],
+            "by": [k[1] for k in order],
+            "ci": [row[0] for row in cell_rows],
+            "cy": [row[1] for row in cell_rows],
+            "cw": [row[2] for row in cell_rows],
+            "cn": [row[3] for row in cell_rows],
+        },
+    }
+    boot_bytes = write_json(os.path.join(data_dir, "boot.json"), boot)
+    print(f"wrote data/boot.json ({boot_bytes/1e6:.2f} MB, "
+          f"{len(order)} bins, {len(cell_rows)} bin-years)", flush=True)
+
+    packs = {}
+    for i in range(n):
+        p = packs.get(s[i])
+        if p is None:
+            p = packs[s[i]] = {
+                "si": s[i], "fips": stfips[s[i]], "state": states[s[i]],
+                "roads": [""], "ridx": {0: 0},
+                "lat": [], "lon": [], "f": [], "y": [], "r": [], "c": [],
+            }
+        ri = p["ridx"].get(r[i])
+        if ri is None:
+            ri = len(p["roads"])
+            p["roads"].append(roads[r[i]])
+            p["ridx"][r[i]] = ri
+        p["lat"].append(lat[i])
+        p["lon"].append(lon[i])
+        p["f"].append(f[i])
+        p["y"].append(y[i])
+        p["r"].append(ri)
+        p["c"].append(c[i])
+
+    pack_bytes = 0
+    biggest = ("", 0)
+    for p in packs.values():
+        del p["ridx"]
+        size = write_json(os.path.join(data_dir, "s", p["fips"] + ".json"), p)
+        pack_bytes += size
+        if size > biggest[1]:
+            biggest = (p["state"], size)
+    print(f"wrote {len(packs)} state packs ({pack_bytes/1e6:.1f} MB total, "
+          f"largest {biggest[0]} {biggest[1]/1e6:.2f} MB)", flush=True)
+
+    agg = {}
+    for i in range(n):
+        if r[i] == 0:
+            continue
+        e = agg.get(r[i])
+        if e is None:
+            agg[r[i]] = [f[i], 1, {s[i]}]
+        else:
+            e[0] += f[i]
+            e[1] += 1
+            e[2].add(s[i])
+    road_rows = sorted(agg.items(), key=lambda kv: (-kv[1][0], -kv[1][1]))
+    roads_out = {
+        "roads": [roads[ri] for ri, _ in road_rows],
+        "d": [e[0] for _, e in road_rows],
+        "c": [e[1] for _, e in road_rows],
+        "st": [sorted(e[2]) for _, e in road_rows],
+    }
+    roads_bytes = write_json(os.path.join(data_dir, "roads.json"), roads_out)
+    print(f"wrote data/roads.json ({roads_bytes/1e6:.2f} MB, {len(road_rows)} roads)", flush=True)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--years", nargs="+", type=int, default=list(range(2010, 2025)))
     ap.add_argument("--cache", default=".cache/fars")
-    ap.add_argument("--out", default="data/fars.json")
+    ap.add_argument("--out", default=".cache/fars.json")
+    ap.add_argument("--data-dir", default="data")
     ap.add_argument("--shards", default="data/d")
+    ap.add_argument("--from-cache", action="store_true")
     args = ap.parse_args()
+
+    if args.from_cache:
+        src = args.out if os.path.exists(args.out) else "data/fars.json"
+        print(f"loading {src}", flush=True)
+        with open(src, encoding="utf-8") as fh:
+            data = json.load(fh)
+        write_outputs(data, args.data_dir)
+        return 0
 
     years = sorted(args.years)
     year_idx = {y: i for i, y in enumerate(years)}
@@ -485,11 +605,9 @@ def main():
         "c":   [t[9] for t in points],
     }
 
-    os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
-    with open(args.out, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
+    size = write_json(args.out, data)
+    write_outputs(data, args.data_dir)
 
-    size = os.path.getsize(args.out)
     print(f"\nwrote {args.out} ({size/1e6:.1f} MB) + shards ({shard_bytes/1e6:.1f} MB)")
     print(f"{len(points)} crashes, {data['meta']['deaths']} deaths, "
           f"{len(roads)-1} roads, dropped {dropped[0]}")

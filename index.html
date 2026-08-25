@@ -7,7 +7,7 @@
 <meta name="description" content="Every fatal crash in America, 2010–2024. Drill from the national picture down to a single crash — vehicles, people, conditions — straight from NHTSA's Fatality Analysis Reporting System.">
 <meta name="theme-color" content="#0a0a0c">
 <meta property="og:title" content="Highway to Hell">
-<meta property="og:description" content="550,678 deaths on American roads, 2010–2024. Tap a bubble, keep drilling, and every dot tells you who and what it took.">
+<meta property="og:description" content="550,678 deaths on American roads, 2010–2024. Zoom from the national burn down to a single crash — every dot tells you who and what it took.">
 <meta property="og:type" content="website">
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="assets/fonts/fonts.css">
@@ -67,7 +67,7 @@
     <button class="pin-clear" id="pin-clear" aria-label="Clear location pin" hidden>×</button>
   </div>
   <div class="stats-nums"><b id="stat-d">—</b><i>\</i><span id="stat-c">—</span></div>
-  <div class="stats-sub" id="stats-sub">deaths\crashes · tap a bubble to open it</div>
+  <div class="stats-sub" id="stats-sub">deaths\crashes · zoom into a state to narrow it down</div>
   <div class="radius-row" id="radius-row" hidden>
     <span class="radius-label">RADIUS</span>
     <button class="rchip" data-mi="1">1 mi</button>
@@ -98,12 +98,12 @@
     <h3>Reading the map</h3>
     <ul>
       <li><span class="k k-heat"></span><div>Zoomed out, the glow is a heat field — the brighter it burns,
-        the more people died there. Nothing is grouped or averaged; every crash contributes.</div></li>
-      <li><span class="k k-dot"></span><div>Keep zooming and the field resolves into individual crashes,
-        one dot each, sized by lives lost. Tap one for the full record: date and time, conditions,
-        every vehicle, every person.</div></li>
-      <li><span class="k k-state"></span><div>Once you're inside a state, the map narrows to that state
-        on its own. Zoom back out to see the country again.</div></li>
+        the more people died there. Every crash contributes to it.</div></li>
+      <li><span class="k k-dot"></span><div>Tap anywhere on the country, or keep zooming, and the field
+        resolves into individual crashes, one dot each, sized by lives lost. Tap one for the full record:
+        date and time, conditions, every vehicle, every person.</div></li>
+      <li><span class="k k-state"></span><div>Once you're inside a state, the map loads and shows that
+        state's crashes — one state at a time, so it stays fast. Zoom back out to see the country again.</div></li>
       <li><span class="k k-years"></span><div>The bars are deaths per year. Drag the two handles to narrow
         the map to a span of years.</div></li>
     </ul>
