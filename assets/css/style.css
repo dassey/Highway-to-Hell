@@ -231,47 +231,6 @@ body::before {
 .locate-btn.live { color: var(--ember-hi); border-color: rgba(255, 90, 31, .45); }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.navchip {
-  position: fixed;
-  top: 74px; left: 14px;
-  z-index: 19;
-  display: flex; align-items: center;
-  background: var(--panel);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 90, 31, .4);
-  border-left: 3px solid var(--ember);
-  border-radius: 5px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, .55), 0 0 24px rgba(255, 90, 31, .12);
-  overflow: hidden;
-}
-.nav-btn {
-  font-family: var(--font-cond);
-  font-weight: 700;
-  font-size: 14px;
-  letter-spacing: .1em;
-  color: #ffb289;
-  background: none;
-  border: 0;
-  padding: 10px 13px;
-  cursor: pointer;
-  transition: background .15s, color .15s;
-}
-.nav-btn:hover { background: rgba(255, 90, 31, .14); color: #ffd3b3; }
-.nav-btn.ghost { color: var(--dim); }
-.nav-btn.ghost:hover { color: var(--txt); }
-.nav-info {
-  font-family: var(--font-cond);
-  font-weight: 600;
-  font-size: 12px;
-  letter-spacing: .14em;
-  color: var(--dim);
-  padding: 0 6px;
-  border-left: 1px solid var(--line);
-  border-right: 1px solid var(--line);
-  white-space: nowrap;
-}
-.nav-info b { color: var(--ember-hi); font-size: 14px; }
-
 .road-banner {
   position: fixed;
   top: 74px; left: 50%;
@@ -519,18 +478,16 @@ body::before {
 .modal-close:hover { color: var(--txt); }
 
 .k { flex: none; display: inline-flex; align-items: center; justify-content: center; }
-.k-cluster {
-  width: 34px; height: 34px; border-radius: 50%;
-  background: #c22815; border: 2px solid rgba(0,0,0,.5);
-  font-family: var(--font-cond); font-weight: 700; font-size: 12px; color: #ffe9d6;
+.k-heat {
+  width: 34px; height: 20px; border-radius: 10px;
+  background: radial-gradient(closest-side, #ffe0a3, #ff5a1f 45%, #7a0e0e 75%, transparent);
 }
-.k-road {
-  min-width: 44px; padding: 2px 4px;
-  font-family: var(--font-cond); font-weight: 700; font-size: 12px; line-height: 1.15;
-  text-align: center; color: #d8d2ca;
-  text-shadow: 0 0 4px #000;
+.k-state {
+  width: 34px; height: 20px;
+  border: 1px dashed rgba(255, 138, 61, .8);
+  border-radius: 3px;
+  background: rgba(255, 90, 31, .12);
 }
-.k-road br + * { color: var(--ember-hi); }
 .k-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--ember); border: 2px solid rgba(0,0,0,.5); margin: 0 11px; }
 .k-years {
   width: 34px; height: 20px;
@@ -639,8 +596,6 @@ body::before {
   .search-wrap { flex: 1; min-width: 0; }
   #search { width: 100%; font-size: 16px; }
   .suggest { left: 0; right: 0; min-width: 0; }
-
-  .navchip { top: auto; bottom: 108px; left: 10px; }
 
   .road-banner { top: auto; bottom: 160px; width: 92vw; }
   .rb-sub { display: none; }

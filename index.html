@@ -52,12 +52,6 @@
   </div>
 </header>
 
-<div class="navchip" id="nav" hidden>
-  <button class="nav-btn" id="nav-back">◂ BACK</button>
-  <span class="nav-info" id="nav-info"></span>
-  <button class="nav-btn ghost" id="nav-all">✕ SHOW ALL</button>
-</div>
-
 <div class="road-banner" id="road-banner" hidden>
   <div class="rb-body">
     <span class="rb-name" id="rb-name"></span>
@@ -103,13 +97,13 @@
 
     <h3>Reading the map</h3>
     <ul>
-      <li><span class="k k-cluster">86k</span><div>Bubbles total the <b>deaths</b> inside them. Tap one to open it —
-        the map keeps only that bubble's crashes and splits them into smaller bubbles. Keep tapping down;
-        <b>◂ BACK</b> climbs out one level, <b>✕ SHOW ALL</b> resets.</div></li>
-      <li><span class="k k-dot"></span><div>Single dots are individual crashes, sized by lives lost.
-        Tap one for the full record: date and time, conditions, every vehicle, every person.</div></li>
-      <li><span class="k k-road">I-40<br>212\188</span><div>Zoomed in, every named road wears its toll:
-        <b class="ember">deaths</b>\<b>crashes</b> for that road in the current view. Tap a label to isolate the road.</div></li>
+      <li><span class="k k-heat"></span><div>Zoomed out, the glow is a heat field — the brighter it burns,
+        the more people died there. Nothing is grouped or averaged; every crash contributes.</div></li>
+      <li><span class="k k-dot"></span><div>Keep zooming and the field resolves into individual crashes,
+        one dot each, sized by lives lost. Tap one for the full record: date and time, conditions,
+        every vehicle, every person.</div></li>
+      <li><span class="k k-state"></span><div>Once you're inside a state, the map narrows to that state
+        on its own. Zoom back out to see the country again.</div></li>
       <li><span class="k k-years"></span><div>The bars are deaths per year. Drag the two handles to narrow
         the map to a span of years.</div></li>
     </ul>

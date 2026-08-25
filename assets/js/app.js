@@ -9,10 +9,11 @@ const STYLE_URLS = {
 };
 const GLYPHS = new URL('assets/glyphs/', location.href).href + '{fontstack}/{range}.pbf';
 const GEO_BASE = QS.get('geo') || 'https://photon.komoot.io';
-const FONT_TEXT = ['Montserrat Medium'];
 const FONT_NUM = ['Open Sans Bold'];
 const US_BOUNDS = [[-125.6, 23.6], [-66.0, 49.8]];
-const ROAD_LABEL_MINZOOM = 6.6;
+const STATE_ZOOM = 5.4;
+const BS = String.fromCharCode(92);
+const DC = 'deaths' + BS + 'crashes';
 const MI_PER_DEG = 69.172;
 const RADII = [1, 3, 5, 10];
 const DEFAULT_RADIUS = 5;
@@ -86,14 +87,13 @@ const S = window.__S = {
   suggestPool: [],
   map: null,
   layersReady: false,
-  scope: null,
-  stack: [],
+  stateScope: -1,
+  stateShapes: [],
   statesGeo: null,
   base: 'dark',
   styleCache: {},
   shardCache: new Map(),
   selFeature: null,
-  drilling: false,
 };
 
 try { S.base = localStorage.getItem(LS_BASE) === 'light' ? 'light' : 'dark'; } catch (e) { }
@@ -109,6 +109,7 @@ Promise.all([
 ]).then(([data, statesGeo, baseStyle]) => {
   S.d = data;
   S.statesGeo = statesGeo;
+  buildStateShapes(statesGeo);
   S.yearHi = data.meta.years.length - 1;
   setLoader(fmt(data.meta.deaths) + ' deaths · ' + fmt(data.meta.crashes) + ' crashes · rendering…');
   buildFeatures();
@@ -156,15 +157,77 @@ function yearOn(yi) { return yi >= S.yearLo && yi <= S.yearHi; }
 
 function activeFeatures() {
   const out = [];
-  const scope = S.scope;
+  const st = S.stateScope;
   for (const ft of S.features) {
     const p = ft.properties;
     if (!yearOn(p.y)) continue;
-    if (scope && !scope[p.i]) continue;
+    if (st >= 0 && p.s !== st) continue;
     if (S.road >= 0 && p.r !== S.road) continue;
     out.push(ft);
   }
   return out;
+}
+
+function buildStateShapes(geo) {
+  if (!geo) return;
+  const idx = new Map(S.d.states.map((n, i) => [n, i]));
+  const shapes = [];
+  for (const ft of geo.features) {
+    const si = idx.get(ft.properties && ft.properties.name);
+    if (si === undefined) continue;
+    const polys = ft.geometry.type === 'Polygon'
+      ? [ft.geometry.coordinates]
+      : ft.geometry.coordinates;
+    let minX = 180; let maxX = -180; let minY = 90; let maxY = -90;
+    for (const poly of polys) {
+      for (const [x, y] of poly[0]) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+    shapes.push({ si, polys, minX, maxX, minY, maxY });
+  }
+  S.stateShapes = shapes;
+}
+
+function ringHas(ring, lng, lat) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0]; const yi = ring[i][1];
+    const xj = ring[j][0]; const yj = ring[j][1];
+    if ((yi > lat) !== (yj > lat)
+      && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+function stateAt(lng, lat) {
+  for (const sh of S.stateShapes) {
+    if (lng < sh.minX || lng > sh.maxX || lat < sh.minY || lat > sh.maxY) continue;
+    for (const poly of sh.polys) {
+      if (!ringHas(poly[0], lng, lat)) continue;
+      let inHole = false;
+      for (let h = 1; h < poly.length; h++) {
+        if (ringHas(poly[h], lng, lat)) { inHole = true; break; }
+      }
+      if (!inHole) return sh.si;
+    }
+  }
+  return -1;
+}
+
+function updateStateScope() {
+  if (!S.layersReady || S.pin) return false;
+  const map = S.map;
+  const want = map.getZoom() >= STATE_ZOOM
+    ? stateAt(map.getCenter().lng, map.getCenter().lat)
+    : -1;
+  if (want === S.stateScope) return false;
+  S.stateScope = want;
+  pushCrashData();
+  return true;
 }
 
 function rebuildRoadTotals() {
@@ -261,7 +324,10 @@ function initMap(baseStyle) {
     setTimeout(dismissLoader, 9000);
   });
 
-  map.on('moveend', refreshViewport);
+  map.on('moveend', () => {
+    updateStateScope();
+    refreshViewport();
+  });
 }
 
 function fitUS(duration) {
@@ -333,9 +399,9 @@ function addLayers() {
       'heatmap-weight': ['interpolate', ['linear'], ['get', 'f'],
         1, 0.006, 4, 0.02, 10, 0.05],
       'heatmap-intensity': ['interpolate', ['linear'], ['zoom'],
-        2, 0.5, 4, 0.7, 6, 1.0, 8, 1.4],
+        2, 0.22, 3, 0.36, 4, 0.7, 6, 1.0, 8, 1.4],
       'heatmap-radius': ['interpolate', ['linear'], ['zoom'],
-        2, 9, 4, 17, 6, 26, 8, 36, 9, 44],
+        2, 4, 3, 8, 4, 17, 6, 26, 8, 36, 9, 44],
       'heatmap-opacity': ['interpolate', ['linear'], ['zoom'],
         6.5, 0.95, 8.6, 0],
       'heatmap-color': ['interpolate', ['linear'], ['heatmap-density'],
@@ -369,6 +435,7 @@ function addLayers() {
     id: 'pts',
     type: 'circle',
     source: 'crashes',
+    minzoom: 6.6,
     paint: {
       'circle-color': ['interpolate', ['linear'], ['get', 'f'],
         1, '#b3220f', 2, '#e0401a', 4, '#ff702a', 8, '#ffa542'],
@@ -411,81 +478,6 @@ function initInteractions() {
   map.on('mouseleave', 'pts', () => { map.getCanvas().style.cursor = ''; });
 }
 
-function camNow() {
-  return { center: S.map.getCenter(), zoom: S.map.getZoom() };
-}
-
-function drillInto(clusterFeature) {
-  if (S.drilling) return;
-  S.drilling = true;
-  const map = S.map;
-  map.getCanvas().style.cursor = 'progress';
-  const id = clusterFeature.properties.cluster_id;
-  const n = clusterFeature.properties.point_count;
-  map.getSource('crashes').getClusterLeaves(id, n, 0).then((leaves) => {
-    const mask = new Uint8Array(S.d.lat.length);
-    let minX = 180; let maxX = -180; let minY = 90; let maxY = -90;
-    for (const lf of leaves) {
-      mask[lf.properties.i] = 1;
-      const [x, y] = lf.geometry.coordinates;
-      if (x < minX) minX = x;
-      if (x > maxX) maxX = x;
-      if (y < minY) minY = y;
-      if (y > maxY) maxY = y;
-    }
-    S.stack.push({ scope: S.scope, cam: camNow() });
-    S.scope = mask;
-    pushCrashData();
-    updateNav();
-    map.fitBounds([[minX, minY], [maxX, maxY]], {
-      padding: { top: 130, bottom: 80, left: 80, right: 80 },
-      maxZoom: 15.5,
-      duration: 800,
-    });
-  }).finally(() => {
-    S.drilling = false;
-    map.getCanvas().style.cursor = '';
-  });
-}
-
-function drillBack() {
-  const frame = S.stack.pop();
-  if (!frame) return;
-  S.scope = frame.scope;
-  pushCrashData();
-  updateNav();
-  S.map.easeTo({ center: frame.cam.center, zoom: frame.cam.zoom, duration: 700 });
-}
-
-function drillReset({ fly = true } = {}) {
-  if (!S.stack.length && !S.scope) return;
-  S.stack = [];
-  S.scope = null;
-  pushCrashData();
-  updateNav();
-  if (fly) fitUS();
-}
-
-function updateNav() {
-  const nav = $('nav');
-  const depth = S.stack.length;
-  if (!depth) {
-    nav.hidden = true;
-    refreshViewport();
-    return;
-  }
-  let d = 0; let cnum = 0;
-  const { f, y } = S.d;
-  for (let i = 0; i < f.length; i++) {
-    if (!S.scope[i] || !yearOn(y[i])) continue;
-    d += f[i];
-    cnum += 1;
-  }
-  $('nav-info').innerHTML = 'IN THIS BUBBLE · <b>' + fmt(d) + '</b>\\' + fmt(cnum);
-  nav.hidden = false;
-  refreshViewport();
-}
-
 function refreshViewport() {
   if (!S.layersReady) return;
   const map = S.map;
@@ -494,107 +486,43 @@ function refreshViewport() {
   const s = b.getSouth(); const n = b.getNorth();
   const wrap = e < w;
 
-  const { lat, lon, f, y, r } = S.d;
+  const { lat, lon, f, y, r, s: st } = S.d;
   const N = lat.length;
   const inRing = S.pin ? makeInRing(S.pin) : null;
-  const scope = S.scope;
-  const doRoads = inRing ? true : map.getZoom() >= ROAD_LABEL_MINZOOM - 0.2;
+  const scope = S.stateScope;
 
-  const inScope = (la, lo) => {
+  const inView = (la, lo) => {
     if (inRing) return inRing(lo, la);
     if (la < s || la > n) return false;
     return wrap ? !(lo < w && lo > e) : !(lo < w || lo > e);
   };
 
   let totD = 0; let totC = 0;
-  const agg = doRoads ? new Map() : null;
-
   for (let i = 0; i < N; i++) {
     if (!yearOn(y[i])) continue;
-    if (scope && !scope[i]) continue;
+    if (scope >= 0 && st[i] !== scope) continue;
     if (S.road >= 0 && r[i] !== S.road) continue;
     const la = lat[i] / 1e5;
     const lo = lon[i] / 1e5;
-    if (!inScope(la, lo)) continue;
+    if (!inView(la, lo)) continue;
     totD += f[i];
     totC += 1;
-    if (agg && r[i] > 0) {
-      let t = agg.get(r[i]);
-      if (!t) { t = [0, 0]; agg.set(r[i], t); }
-      t[0] += f[i];
-      t[1] += 1;
-    }
   }
 
   $('stat-d').textContent = fmt(totD);
   $('stat-c').textContent = fmt(totC);
   if (S.pin) {
     $('stats-kicker').textContent = 'WITHIN ' + S.pin.mi + ' MI · ' + (S.pin.name || 'PINNED SPOT').toUpperCase();
-    $('stats-sub').textContent = 'deaths\\crashes in the ring · drag the pin to move it';
+    $('stats-sub').textContent = DC + ' in the ring · drag the pin to move it';
+  } else if (scope >= 0) {
+    $('stats-kicker').textContent = S.d.states[scope].toUpperCase();
+    $('stats-sub').textContent = DC + (map.getZoom() >= 9
+      ? ' in view · tap a dot for the full record'
+      : ' in view · keep zooming for single crashes');
   } else {
-    $('stats-kicker').textContent = S.stack.length ? 'IN VIEW · DRILLED' : 'IN THIS VIEW';
-    $('stats-sub').textContent = doRoads
-      ? 'deaths\\crashes · tap a road label to isolate it'
-      : 'deaths\\crashes · tap a bubble to open it';
+    $('stats-kicker').textContent = 'IN THIS VIEW';
+    $('stats-sub').textContent = DC + ' · zoom into a state to narrow it down';
   }
-
-  if (!agg) {
-    setRoadLabels([]);
-    return;
-  }
-
-  const zoom = map.getZoom();
-  const topN = inRing ? 120 : zoom < 8 ? 14 : zoom < 10 ? 42 : 90;
-  const top = [...agg.entries()].sort((a, b2) => b2[1][0] - a[1][0]).slice(0, topN);
-  const wanted = new Map(top.map(([ri], rank) => [ri, rank]));
-
-  const pos = new Map();
-  for (let i = 0; i < N; i++) {
-    const ri = r[i];
-    if (!wanted.has(ri)) continue;
-    if (!yearOn(y[i])) continue;
-    if (scope && !scope[i]) continue;
-    if (S.road >= 0 && ri !== S.road) continue;
-    const la = lat[i] / 1e5;
-    const lo = lon[i] / 1e5;
-    if (!inScope(la, lo)) continue;
-    let p = pos.get(ri);
-    if (!p) { p = { sx: 0, sy: 0, pts: [] }; pos.set(ri, p); }
-    p.sx += lo;
-    p.sy += la;
-    p.pts.push([lo, la]);
-  }
-
-  const feats = [];
-  for (const [ri, rank] of wanted) {
-    const p = pos.get(ri);
-    if (!p) continue;
-    const cx = p.sx / p.pts.length;
-    const cy = p.sy / p.pts.length;
-    let best = p.pts[0]; let bd = Infinity;
-    for (const pt of p.pts) {
-      const dx = pt[0] - cx; const dy = pt[1] - cy;
-      const d2 = dx * dx + dy * dy;
-      if (d2 < bd) { bd = d2; best = pt; }
-    }
-    const t = agg.get(ri);
-    feats.push({
-      type: 'Feature',
-      geometry: { type: 'Point', coordinates: best },
-      properties: {
-        rid: ri,
-        name: S.d.roads[ri],
-        label: fmt(t[0]) + '\\' + fmt(t[1]),
-        order: rank,
-      },
-    });
-  }
-  setRoadLabels(feats);
-}
-
-function setRoadLabels(feats) {
-  const src = S.map.getSource('roadlabels');
-  if (src) src.setData({ type: 'FeatureCollection', features: feats });
 }
 
 function pushCrashData() {
@@ -605,6 +533,10 @@ function pushCrashData() {
 
 function applyPin(pin, { fly = true } = {}) {
   S.pin = pin;
+  if (S.stateScope >= 0) {
+    S.stateScope = -1;
+    pushCrashData();
+  }
   const poly = ringPolygon(pin);
   S.map.getSource('pin-ring').setData({ type: 'Feature', geometry: poly, properties: {} });
 
@@ -656,6 +588,7 @@ function clearPin() {
   $('locate-btn').classList.remove('live');
   writePinToURL(null);
   try { localStorage.removeItem(LS_PIN); } catch (e) { }
+  updateStateScope();
   refreshViewport();
 }
 
@@ -751,6 +684,7 @@ function toast(msg) {
 
 function selectRoad(ri) {
   S.road = ri;
+  S.stateScope = -1;
   const feats = activeFeatures();
   S.map.getSource('crashes').setData({ type: 'FeatureCollection', features: feats });
 
@@ -794,6 +728,7 @@ function clearRoad() {
   if (S.road < 0) return;
   S.road = -1;
   $('road-banner').hidden = true;
+  updateStateScope();
   pushCrashData();
   refreshViewport();
 }
@@ -1008,7 +943,6 @@ function setBase(base) {
       S.layersReady = true;
       if (S.pin) applyPin(S.pin, { fly: false });
       else refreshViewport();
-      updateNav();
     });
   }).catch(() => toast('Could not load that basemap — staying on this one.'));
 }
@@ -1057,7 +991,6 @@ function initYearSlider() {
       if (S.layersReady) {
         pushCrashData();
         refreshViewport();
-        updateNav();
       }
       if (S.road >= 0) selectRoad(S.road);
     }, 250);
@@ -1098,8 +1031,6 @@ function initUI() {
   $('pin-clear').addEventListener('click', clearPin);
   $('locate-btn').addEventListener('click', locateMe);
   $('panel-close').addEventListener('click', closePanel);
-  $('nav-back').addEventListener('click', drillBack);
-  $('nav-all').addEventListener('click', () => drillReset());
   $('base-btn').addEventListener('click', () => setBase(S.base === 'dark' ? 'light' : 'dark'));
   $('base-btn').classList.toggle('lit', S.base === 'light');
   for (const chip of document.querySelectorAll('.rchip')) {
@@ -1110,7 +1041,6 @@ function initUI() {
   $('brand').addEventListener('click', () => {
     clearRoad();
     closePanel();
-    drillReset({ fly: false });
     fitUS();
   });
 
@@ -1218,7 +1148,6 @@ function renderSuggest(roads, places, roadsFirst, pendingNote) {
         $('search').value = '';
         $('search').blur();
         clearRoad();
-        drillReset({ fly: false });
         applyPin({ lng: pl.lng, lat: pl.lat, mi: (S.pin && S.pin.mi) || DEFAULT_RADIUS, name: pl.short });
       });
       box.appendChild(btn);
@@ -1237,7 +1166,6 @@ function renderSuggest(roads, places, roadsFirst, pendingNote) {
         hideSuggest();
         $('search').value = '';
         $('search').blur();
-        drillReset({ fly: false });
         selectRoad(ri);
       });
       box.appendChild(btn);
