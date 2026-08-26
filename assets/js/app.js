@@ -443,10 +443,6 @@ function applyFilters() {
   }
   if (map.getLayer('pts')) map.setFilter('pts', pts);
   if (map.getLayer('pts-out')) map.setFilter('pts-out', out);
-  if (map.getLayer('pt-count')) {
-    const badge = ['any', ['>=', ['get', 'f'], 2], ['>=', ['zoom'], 13.5]];
-    map.setFilter('pt-count', pts ? ['all', pts, badge] : badge);
-  }
 }
 
 function roadDisplay(on) {
@@ -703,26 +699,6 @@ function addLayers() {
       'circle-stroke-opacity': PTS_STROKE_OPACITY,
     },
   }, under);
-
-  // per-crash death count at close zoom
-  map.addLayer({
-    id: 'pt-count',
-    type: 'symbol',
-    source: 'dots',
-    minzoom: 10.5,
-    filter: ['any', ['>=', ['get', 'f'], 2], ['>=', ['zoom'], 13.5]],
-    layout: {
-      'text-field': ['to-string', ['get', 'f']],
-      'text-font': FONT_NUM,
-      'text-size': 10.5,
-      'text-allow-overlap': true,
-    },
-    paint: {
-      'text-color': T.numText,
-      'text-halo-color': T.numHalo,
-      'text-halo-width': 1,
-    },
-  });
 
   // every road wears its toll: NAME over deaths\crashes
   map.addLayer({
