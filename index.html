@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Highway to Hell — U.S. road deaths, mapped</title>
-<meta name="description" content="Every fatal crash in America, 2022–2024. Each road carries its toll: deaths\crashes, straight from NHTSA's Fatality Analysis Reporting System.">
+<meta name="description" content="Every fatal crash in America, 2001–2024. Drill from the national picture down to a single crash — vehicles, people, conditions — straight from NHTSA's Fatality Analysis Reporting System.">
 <meta name="theme-color" content="#0a0a0c">
 <meta property="og:title" content="Highway to Hell">
-<meta property="og:description" content="122,450 deaths on American roads, 2022–2024. Zoom in — every road shows its toll.">
+<meta property="og:description" content="898,888 deaths on American roads, 2001–2024. Zoom from the national burn down to a single crash — every dot tells you who and what it took.">
 <meta property="og:type" content="website">
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="assets/fonts/fonts.css">
@@ -19,7 +19,6 @@
 <div id="map"></div>
 <div class="vignette" aria-hidden="true"></div>
 
-<!-- top scrim / header -->
 <header class="topbar">
   <div class="brand" id="brand">
     <svg class="mark" viewBox="0 0 48 48" aria-hidden="true">
@@ -28,12 +27,19 @@
     </svg>
     <div class="brand-text">
       <h1>Highway&nbsp;to&nbsp;Hell</h1>
-      <p class="tag">U.S. ROAD DEATHS · 2022–2024 · <span class="tag-num">DEATHS\CRASHES</span></p>
+      <p class="tag">U.S. ROAD DEATHS · <span id="tag-years">—</span> · <span class="tag-num">DEATHS\CRASHES</span></p>
     </div>
   </div>
 
   <div class="controls">
-    <div class="years" id="years" role="group" aria-label="Years"></div>
+    <div class="yearbox" role="group" aria-label="Year range">
+      <div class="yr-hist" id="yr-hist" aria-hidden="true"></div>
+      <div class="yr-track">
+        <input type="range" id="yr-lo" min="0" max="14" value="0" step="1" aria-label="First year">
+        <input type="range" id="yr-hi" min="0" max="14" value="14" step="1" aria-label="Last year">
+      </div>
+      <div class="yr-label" id="yr-label">—</div>
+    </div>
     <div class="search-wrap" id="search-wrap">
       <input id="search" type="search" placeholder="A town, an address, a road…" autocomplete="off" spellcheck="false" aria-label="Search for a place or road">
       <div class="suggest" id="suggest" hidden></div>
@@ -41,11 +47,31 @@
     <button class="icon-btn locate-btn" id="locate-btn" aria-label="Use my location" title="Use my location">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm9 3h-2.07A7 7 0 0 0 13 5.07V3h-2v2.07A7 7 0 0 0 5.07 11H3v2h2.07A7 7 0 0 0 11 18.93V21h2v-2.07A7 7 0 0 0 18.93 13H21zm-9 6a5 5 0 1 1 0-10 5 5 0 0 1 0 10z"/></svg>
     </button>
+    <button class="icon-btn locate-btn" id="route-btn" aria-label="Check a route" title="Check a route: deaths along a drive">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 21a3.5 3.5 0 1 1 3.35-4.5H14a2.5 2.5 0 0 0 0-5H9.5a4.5 4.5 0 0 1 0-9h4.15a3.5 3.5 0 1 1 0 2H9.5a2.5 2.5 0 0 0 0 5H14a4.5 4.5 0 0 1 0 9H9.85A3.5 3.5 0 0 1 6.5 21zm0-5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM17.5 3a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"/></svg>
+    </button>
+    <button class="icon-btn" id="base-btn" aria-label="Switch basemap" title="Switch between dark and street basemap">◐</button>
     <button class="icon-btn" id="about-btn" aria-label="About this map" title="About this map">?</button>
   </div>
 </header>
 
-<!-- selected road banner -->
+<div class="routebar" id="routebar" hidden>
+  <input id="route-a" type="text" placeholder="From… town or address" autocomplete="off" spellcheck="false" aria-label="Route start">
+  <span class="rt-arrow" aria-hidden="true">→</span>
+  <input id="route-b" type="text" placeholder="To…" autocomplete="off" spellcheck="false" aria-label="Route end">
+  <button class="rt-go" id="route-go">CHECK</button>
+  <button class="rt-x" id="route-close" aria-label="Close route check">×</button>
+</div>
+
+<div class="road-banner route-banner" id="route-banner" hidden>
+  <div class="rb-body">
+    <span class="rb-name" id="rt-name"></span>
+    <span class="rb-nums" id="rt-nums"></span>
+    <span class="rb-sub" id="rt-sub"></span>
+  </div>
+  <button class="rb-clear" id="rt-clear" aria-label="Clear route">×</button>
+</div>
+
 <div class="road-banner" id="road-banner" hidden>
   <div class="rb-body">
     <span class="rb-name" id="rb-name"></span>
@@ -55,14 +81,13 @@
   <button class="rb-clear" id="rb-clear" aria-label="Clear road filter">×</button>
 </div>
 
-<!-- viewport / radius stats -->
 <aside class="stats" id="stats" aria-live="polite">
   <div class="stats-head">
     <div class="stats-kicker" id="stats-kicker">IN THIS VIEW</div>
     <button class="pin-clear" id="pin-clear" aria-label="Clear location pin" hidden>×</button>
   </div>
   <div class="stats-nums"><b id="stat-d">—</b><i>\</i><span id="stat-c">—</span></div>
-  <div class="stats-sub" id="stats-sub">deaths\crashes · zoom in for per-road counts</div>
+  <div class="stats-sub" id="stats-sub">deaths\crashes · zoom into a state to narrow it down</div>
   <div class="radius-row" id="radius-row" hidden>
     <span class="radius-label">RADIUS</span>
     <button class="rchip" data-mi="1">1 mi</button>
@@ -71,13 +96,18 @@
     <button class="rchip" data-mi="10">10 mi</button>
   </div>
   <div class="stats-attrib">©&nbsp;<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>
-    ©&nbsp;<a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a> ·
+    ©&nbsp;<a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>
+    ©&nbsp;<a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a> ·
     <a href="https://www.nhtsa.gov/research-data/fatality-analysis-reporting-system-fars" target="_blank" rel="noopener">NHTSA&nbsp;FARS</a></div>
+</aside>
+
+<aside class="panel" id="panel" hidden aria-label="Crash details">
+  <button class="panel-close" id="panel-close" aria-label="Close crash details">×</button>
+  <div class="panel-body" id="panel-body"></div>
 </aside>
 
 <div class="toast" id="toast" role="status"></div>
 
-<!-- about modal -->
 <div class="modal" id="modal" hidden>
   <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title">
     <button class="modal-close" id="modal-close" aria-label="Close">×</button>
@@ -87,30 +117,43 @@
 
     <h3>Reading the map</h3>
     <ul>
-      <li><span class="k k-heat"></span><div>Zoomed out, the glow is a heat field of deaths.</div></li>
-      <li><span class="k k-cluster">86</span><div>Mid-zoom circles total the <b>deaths</b> inside them. Tap to dive.</div></li>
-      <li><span class="k k-road">I-40<br>212\188</span><div>Zoomed in, every named road wears its toll:
-        <b class="ember">deaths</b>\<b>crashes</b> for that road in the current view. Tap a label to isolate the road.</div></li>
-      <li><span class="k k-dot"></span><div>Single dots are individual crashes, sized by lives lost. Tap for details.</div></li>
+      <li><span class="k k-heat"></span><div>Zoomed out, the glow is a heat field — the brighter it burns,
+        the more people died there. Every crash contributes to it.</div></li>
+      <li><span class="k k-dot"></span><div>Tap anywhere on the country, or keep zooming, and the field
+        resolves into individual crashes, one dot each, sized by lives lost. Tap one for the full record:
+        date and time, conditions, every vehicle, every person.</div></li>
+      <li><span class="k k-state"></span><div>Once you're inside a state, the map loads and shows that
+        state's crashes — one state at a time, so it stays fast. Zoom back out to see the country again.</div></li>
+      <li><span class="k k-years"></span><div>The bars are deaths per year. Drag the two handles to narrow
+        the map to a span of years.</div></li>
     </ul>
 
     <h3>The data</h3>
     <p>Crash records come from NHTSA's <a href="https://www.nhtsa.gov/research-data/fatality-analysis-reporting-system-fars"
       target="_blank" rel="noopener">Fatality Analysis Reporting System (FARS)</a> — the federal census of every
-      motor-vehicle crash on a public road that kills someone within 30&nbsp;days. Roads are grouped by the
-      trafficway identifier (<code>TWAY_ID</code>) states report, so the same highway can appear under more than one
-      name, and a road named in two states counts each state's stretch. <span id="m-dropped">—</span> crashes with
-      unusable coordinates are not shown. Data is public domain; this site is not affiliated with NHTSA or USDOT.</p>
+      motor-vehicle crash on a public road that kills someone within 30&nbsp;days. Tapping a dot loads that
+      crash's full FARS record: conditions, vehicles, and the people involved. Roads are grouped by the
+      trafficway identifier states report, so the same highway can appear under more than one name.
+      <span id="m-dropped">—</span> crashes with unusable coordinates are not shown. Data is public domain;
+      this site is not affiliated with NHTSA or USDOT.</p>
+
+    <h3>Route check</h3>
+    <p>The route button (next to the crosshair) takes a start and an end, pulls the driving route from the open
+      <a href="http://project-osrm.org" target="_blank" rel="noopener">OSRM</a> router, and counts
+      every death within a quarter mile of the road — total for the drive, the route colored by how
+      deadly each stretch has been, and a list of the stretches where you should be extra careful.</p>
 
     <h3>Your corner of the map</h3>
     <p>Search a town or address (or hit the crosshair for your location) to drop a pin
       and draw a 1–10&nbsp;mile ring — the numbers then count only what happened inside it.
-      Drag the pin to move it. Place lookups go to the open
+      Drag the pin to move it. The ◐ button swaps the dark map for a street map when you
+      need names and buildings. Place lookups go to the open
       <a href="https://photon.komoot.io" target="_blank" rel="noopener">Photon</a> geocoder;
       your device location is only used to move the map and never leaves your browser.</p>
 
-    <p class="modal-foot">Basemap © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>
-      contributors, © <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a> ·
+    <p class="modal-foot">Basemaps © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>
+      contributors, © <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>,
+      © <a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a> ·
       rendered with <a href="https://maplibre.org" target="_blank" rel="noopener">MapLibre&nbsp;GL</a> ·
       dataset built <span id="m-built">—</span></p>
 
@@ -118,7 +161,6 @@
   </div>
 </div>
 
-<!-- loader -->
 <div class="loader" id="loader">
   <svg class="mark big" viewBox="0 0 48 48" aria-hidden="true">
     <path class="shield" d="M24 3 L42 9 C42 24 36 37 24 45 C12 37 6 24 6 9 Z"/>
@@ -126,7 +168,7 @@
   </svg>
   <div class="loader-title">HIGHWAY TO HELL</div>
   <div class="road-line" aria-hidden="true"></div>
-  <div class="loader-status" id="loader-status">pulling crash records…</div>
+  <div class="loader-status" id="loader-status">pulling 24 years of crash records…</div>
 </div>
 
 <script src="assets/vendor/maplibre-gl.js"></script>
