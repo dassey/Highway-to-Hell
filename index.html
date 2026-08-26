@@ -12,7 +12,7 @@
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="assets/fonts/fonts.css">
 <link rel="stylesheet" href="assets/vendor/maplibre-gl.css">
-<link rel="stylesheet" href="assets/css/style.css?v=6">
+<link rel="stylesheet" href="assets/css/style.css?v=7">
 </head>
 <body>
 
@@ -52,6 +52,7 @@
     </button>
     <button class="icon-btn" id="lens-btn" aria-label="Investigate around the cursor" title="Lens: only crashes within reach of the cursor">◎</button>
     <button class="icon-btn" id="base-btn" aria-label="Switch basemap" title="Switch between dark and street basemap">◐</button>
+    <button class="icon-btn" id="set-btn" aria-label="Settings" title="Colours, sizes and behaviour">&#9881;</button>
     <button class="icon-btn" id="about-btn" aria-label="About this map" title="About this map">?</button>
   </div>
 </header>
@@ -109,6 +110,20 @@
 </aside>
 
 <div class="toast" id="toast" role="status"></div>
+
+<div class="modal" id="set-modal" hidden>
+  <div class="modal-card set-card" role="dialog" aria-modal="true" aria-labelledby="set-title">
+    <button class="modal-close" id="set-close" aria-label="Close">&times;</button>
+    <h2 id="set-title">Settings</h2>
+    <p class="set-lede">Changes apply the moment you make them and are remembered on this device.</p>
+    <div class="set-body" id="set-body"></div>
+    <textarea class="set-out" id="set-out" readonly hidden aria-label="Settings as a file"></textarea>
+    <div class="set-actions">
+      <button class="set-btn" id="set-copy">COPY AS FILE</button>
+      <button class="set-btn set-reset" id="set-reset">RESET ALL</button>
+    </div>
+  </div>
+</div>
 
 <div class="modal" id="modal" hidden>
   <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title">
@@ -175,7 +190,7 @@
 </div>
 
 <script src="assets/vendor/maplibre-gl.js"></script>
-<script src="assets/js/settings.js?v=6"></script>
-<script src="assets/js/app.js?v=6"></script>
+<script src="assets/js/settings.js?v=7"></script>
+<script src="assets/js/app.js?v=7"></script>
 </body>
 </html>

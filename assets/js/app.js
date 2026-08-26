@@ -34,20 +34,41 @@ const DEFAULTS = {
   performance: { statePacksCached: { desktop: 6, phone: 3 }, caseFilesCached: 12,
     statsRefreshDelayMs: 120, yearSliderDelayMs: 250 },
   interface: { toastSeconds: 3.6, loaderTimeoutSeconds: 9, searchDelayMs: 160 },
+  theme: {
+    '--bg': '#0a0a0c',
+    '--panel': 'rgba(14,13,16,0.88)',
+    '--line': 'rgba(255,255,255,0.09)',
+    '--txt': '#e9e4dd',
+    '--dim': '#9a9186',
+    '--faint': '#6b645c',
+    '--ember': '#ff5a1f',
+    '--ember-hi': '#ff8a3d',
+    '--amber': '#f5a300',
+    '--blood': '#b81d1d',
+  },
 };
 
-const SET = (() => {
-  const user = window.H2H_SETTINGS;
-  const merge = (base, over) => {
-    if (!over || typeof over !== 'object' || Array.isArray(over)) {
-      return over === undefined ? base : over;
-    }
-    const out = Array.isArray(base) ? base.slice() : Object.assign({}, base);
-    for (const k of Object.keys(over)) out[k] = merge(base ? base[k] : undefined, over[k]);
-    return out;
-  };
-  try { return merge(DEFAULTS, user); } catch (e) { return DEFAULTS; }
+const LS_SET = 'h2h.settings';
+
+function deepMerge(base, over) {
+  if (!over || typeof over !== 'object' || Array.isArray(over)) {
+    return over === undefined ? base : over;
+  }
+  const out = Array.isArray(base) ? base.slice() : Object.assign({}, base);
+  for (const k of Object.keys(over)) out[k] = deepMerge(base ? base[k] : undefined, over[k]);
+  return out;
+}
+
+function readOverrides() {
+  try { return JSON.parse(localStorage.getItem(LS_SET) || 'null') || {}; } catch (e) { return {}; }
+}
+
+const FILE_SET = (() => {
+  try { return deepMerge(DEFAULTS, window.H2H_SETTINGS); } catch (e) { return DEFAULTS; }
 })();
+
+let OVERRIDES = readOverrides();
+let SET = deepMerge(FILE_SET, OVERRIDES);
 
 const rampPairs = (obj) => Object.keys(obj)
   .map(Number).sort((a, b) => a - b)
@@ -59,22 +80,23 @@ const ROADS_URL = 'data/roads.json' + DATA_V;
 const STATES_URL = 'data/us-states.json?v=1';
 const packUrl = (fips) => 'data/s/' + fips + '.json' + DATA_V;
 const TILE_URL = new URL('data/t/', location.href).href + '{z}/{x}/{y}.pbf' + DATA_V;
-const TILE_MIN = SET.dots.appearAtZoom;
-const TILE_MAX = SET.dots.tileDetailZoom;
+const TILE_MIN = FILE_SET.dots.tileDetailZoom - 1;
+const TILE_MAX = FILE_SET.dots.tileDetailZoom;
+const dotZoom = () => Math.max(TILE_MIN, SET.dots.appearAtZoom);
 const STYLE_URLS = {
   dark: QS.get('style') || SET.basemap.darkStyle,
   light: QS.get('styleLight') || SET.basemap.lightStyle,
 };
 const GLYPHS = new URL('assets/glyphs/', location.href).href + '{fontstack}/{range}.pbf';
-const GEO_BASE = QS.get('geo') || SET.services.geocoder;
-const OSRM_BASE = QS.get('osrm') || SET.services.router;
-const ROUTE_BUF_MI = SET.route.corridorHalfWidthMiles;
+const GEO_BASE = QS.get('geo') || FILE_SET.services.geocoder;
+const OSRM_BASE = QS.get('osrm') || FILE_SET.services.router;
+const ROUTE_BUF_MI = FILE_SET.route.corridorHalfWidthMiles;
 const ROUTE_CELL = 0.08;
-const US_BOUNDS = SET.camera.homeBounds;
+const US_BOUNDS = FILE_SET.camera.homeBounds;
 const IS_TOUCH = matchMedia('(pointer: coarse)').matches;
 const PACK_CACHE = IS_TOUCH
-  ? SET.performance.statePacksCached.phone
-  : SET.performance.statePacksCached.desktop;
+  ? FILE_SET.performance.statePacksCached.phone
+  : FILE_SET.performance.statePacksCached.desktop;
 const BS = String.fromCharCode(92);
 const DC = 'deaths' + BS + 'crashes';
 const MI_PER_DEG = 69.172;
@@ -86,38 +108,32 @@ const MONTHS = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const DOW = ['', 'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-const PTS_OPACITY = ['interpolate', ['linear'], ['zoom'],
+const ptsOpacity = () => ['interpolate', ['linear'], ['zoom'],
   SET.dots.fadeInFrom, SET.dots.minOpacity, SET.dots.fadeInTo, SET.dots.maxOpacity];
-const PTS_STROKE_OPACITY = ['interpolate', ['linear'], ['zoom'],
+const ptsStrokeOpacity = () => ['interpolate', ['linear'], ['zoom'],
   SET.dots.fadeInFrom, 0, SET.dots.fadeInTo + 0.6, 1];
-const PTS_RADIUS = ['interpolate', ['linear'], ['zoom']].concat(
+const ptsRadius = () => ['interpolate', ['linear'], ['zoom']].concat(
   Object.keys(SET.dots.sizeByZoom).map(Number).sort((a, b) => a - b)
     .reduce((acc, z) => acc.concat([z,
       ['+', SET.dots.sizeByZoom[z].base,
         ['*', SET.dots.sizeByZoom[z].perDeath, ['get', 'f']]]]), []));
-const PTS_COLOR = ['interpolate', ['linear'], ['get', 'f']]
+const ptsColor = () => ['interpolate', ['linear'], ['get', 'f']]
   .concat(rampPairs(SET.dots.colorByDeaths));
-const PTS_STROKE_W = ['interpolate', ['linear'], ['zoom']]
+const ptsStrokeW = () => ['interpolate', ['linear'], ['zoom']]
   .concat(rampPairs(SET.dots.outlineWidthByZoom));
-const SEL_RADIUS = ['interpolate', ['linear'], ['zoom']]
+const selRadius = () => ['interpolate', ['linear'], ['zoom']]
   .concat(rampPairs(SET.selection.ringSizeByZoom));
-const STATE_WIDTH = ['interpolate', ['linear'], ['zoom']]
+const stateWidth = () => ['interpolate', ['linear'], ['zoom']]
   .concat(rampPairs(SET.stateLines.widthByZoom));
 const FEAT_CHUNK = 12000;
-const LENS_RADII = SET.lens.radiiMiles;
-const LENS_DEFAULT = SET.lens.defaultMiles;
+const LENS_RADII = FILE_SET.lens.radiiMiles;
+const LENS_DEFAULT = FILE_SET.lens.defaultMiles;
 const LENS_MIN_ZOOM = TILE_MIN;
 
-const THEMES = {
-  dark: {
-    stateLine: SET.stateLines.color.dark,
-    ptStroke: SET.dots.outlineColor.dark,
-  },
-  light: {
-    stateLine: SET.stateLines.color.light,
-    ptStroke: SET.dots.outlineColor.light,
-  },
-};
+const theme = () => ({
+  stateLine: S.base === 'light' ? SET.stateLines.color.light : SET.stateLines.color.dark,
+  ptStroke: S.base === 'light' ? SET.dots.outlineColor.light : SET.dots.outlineColor.dark,
+});
 
 const REST_SHORT = {
   'None Used/Not Applicable': 'No restraint',
@@ -540,6 +556,7 @@ function initMap(baseStyle) {
       syncData();
       refreshViewport();
     }
+    applyLiveSettings();
     map.once('idle', dismissLoader);
     setTimeout(dismissLoader, SET.interface.loaderTimeoutSeconds * 1000);
   });
@@ -563,7 +580,7 @@ function fitUS(duration) {
 
 function addLayers() {
   const map = S.map;
-  const T = THEMES[S.base];
+  const T = theme();
 
   const styleLayers = map.getStyle().layers || [];
   const firstSymbol = styleLayers.find((l) => l.type === 'symbol');
@@ -577,7 +594,7 @@ function addLayers() {
       source: 'states',
       paint: {
         'line-color': T.stateLine,
-        'line-width': STATE_WIDTH,
+        'line-width': stateWidth(),
         'line-opacity': ['interpolate', ['linear'], ['zoom'],
           SET.stateLines.fadeOutFrom, 1, SET.stateLines.fadeOutTo, 0],
       },
@@ -656,10 +673,10 @@ function addLayers() {
     source: 'tiles',
     'source-layer': 'crashes',
     filter: ['boolean', false],
-    minzoom: TILE_MIN,
+    minzoom: dotZoom(),
     paint: {
       'circle-color': SET.dots.outsideRingColor,
-      'circle-radius': PTS_RADIUS,
+      'circle-radius': ptsRadius(),
       'circle-opacity': SET.dots.outsideRingOpacity,
     },
   }, under);
@@ -669,14 +686,14 @@ function addLayers() {
     type: 'circle',
     source: 'tiles',
     'source-layer': 'crashes',
-    minzoom: TILE_MIN,
+    minzoom: dotZoom(),
     paint: {
-      'circle-color': PTS_COLOR,
-      'circle-radius': PTS_RADIUS,
-      'circle-stroke-width': PTS_STROKE_W,
+      'circle-color': ptsColor(),
+      'circle-radius': ptsRadius(),
+      'circle-stroke-width': ptsStrokeW(),
       'circle-stroke-color': T.ptStroke,
-      'circle-opacity': PTS_OPACITY,
-      'circle-stroke-opacity': PTS_STROKE_OPACITY,
+      'circle-opacity': ptsOpacity(),
+      'circle-stroke-opacity': ptsStrokeOpacity(),
     },
   }, under);
 
@@ -685,9 +702,9 @@ function addLayers() {
     type: 'circle',
     source: 'dots',
     paint: {
-      'circle-color': PTS_COLOR,
-      'circle-radius': PTS_RADIUS,
-      'circle-stroke-width': PTS_STROKE_W,
+      'circle-color': ptsColor(),
+      'circle-radius': ptsRadius(),
+      'circle-stroke-width': ptsStrokeW(),
       'circle-stroke-color': T.ptStroke,
       'circle-opacity': SET.dots.maxOpacity,
     },
@@ -699,7 +716,7 @@ function addLayers() {
     source: 'sel',
     paint: {
       'circle-color': 'rgba(0,0,0,0)',
-      'circle-radius': SEL_RADIUS,
+      'circle-radius': selRadius(),
       'circle-stroke-width': SET.selection.ringWidth,
       'circle-stroke-color': SET.selection.ringColor,
     },
@@ -922,8 +939,8 @@ function lensApply() {
 function lensDisplay(on) {
   const map = S.map;
   if (!map.getLayer('pts')) return;
-  map.setPaintProperty('pts', 'circle-opacity', on ? SET.dots.maxOpacity : PTS_OPACITY);
-  map.setPaintProperty('pts', 'circle-stroke-opacity', on ? 1 : PTS_STROKE_OPACITY);
+  map.setPaintProperty('pts', 'circle-opacity', on ? SET.dots.maxOpacity : ptsOpacity());
+  map.setPaintProperty('pts', 'circle-stroke-opacity', on ? 1 : ptsStrokeOpacity());
 }
 
 function setLens(on) {
@@ -1802,10 +1819,21 @@ function initUI() {
   $('m-dropped').textContent = fmt(meta.dropped);
   $('m-built').textContent = meta.generated;
   $('about-btn').addEventListener('click', () => { $('modal').hidden = false; });
+  $('set-btn').addEventListener('click', () => {
+    buildSettings();
+    $('set-modal').hidden = false;
+  });
+  $('set-close').addEventListener('click', () => { $('set-modal').hidden = true; });
+  $('set-modal').addEventListener('click', (e) => {
+    if (e.target === $('set-modal')) $('set-modal').hidden = true;
+  });
+  $('set-copy').addEventListener('click', copySettings);
+  $('set-reset').addEventListener('click', resetSettings);
   $('modal-close').addEventListener('click', () => { $('modal').hidden = true; });
   $('modal').addEventListener('click', (e) => { if (e.target === $('modal')) $('modal').hidden = true; });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
+      if (!$('set-modal').hidden) { $('set-modal').hidden = true; return; }
       if (!$('panel').hidden) { closePanel(); return; }
       if (S.lens) { setLens(false); return; }
       $('modal').hidden = true;
@@ -1872,6 +1900,7 @@ function initUI() {
 
   $('stat-d').textContent = fmt(meta.deaths);
   $('stat-c').textContent = fmt(meta.crashes);
+  applyTheme();
 }
 
 let placeAbort = null;
@@ -2008,4 +2037,270 @@ function dismissLoader() {
   if (l.classList.contains('gone')) return;
   l.classList.add('gone');
   setTimeout(() => { l.style.display = 'none'; }, 800);
+}
+
+const SCHEMA = [
+  { group: 'Map', fields: [
+    { path: 'basemap.start', label: 'Basemap', type: 'select', options: ['dark', 'light'] },
+    { path: 'basemap.rememberChoice', label: 'Remember my basemap choice', type: 'bool' },
+    { path: 'camera.tapToDiveZoom', label: 'Tap-to-dive zoom', type: 'num', min: 4, max: 14, step: 0.1 },
+    { path: 'camera.maxZoom', label: 'Maximum zoom', type: 'num', min: 10, max: 20, step: 1 },
+  ] },
+  { group: 'Crash dots', fields: [
+    { path: 'dots.appearAtZoom', label: 'Dots appear at zoom', type: 'num', min: 8, max: 13, step: 0.5 },
+    { path: 'dots.colorByDeaths.1', label: '1 death', type: 'color' },
+    { path: 'dots.colorByDeaths.2', label: '2 deaths', type: 'color' },
+    { path: 'dots.colorByDeaths.4', label: '4 deaths', type: 'color' },
+    { path: 'dots.colorByDeaths.8', label: '8 or more deaths', type: 'color' },
+    { path: 'dots.sizeByZoom.8.base', label: 'Dot size, far out', type: 'num', min: 0.2, max: 6, step: 0.1 },
+    { path: 'dots.sizeByZoom.15.base', label: 'Dot size, close in', type: 'num', min: 1, max: 20, step: 0.5 },
+    { path: 'dots.sizeByZoom.15.perDeath', label: 'Extra size per death', type: 'num', min: 0, max: 8, step: 0.1 },
+    { path: 'dots.maxOpacity', label: 'Dot opacity', type: 'num', min: 0.1, max: 1, step: 0.02 },
+    { path: 'dots.outlineColor.dark', label: 'Dot outline on dark map', type: 'color' },
+    { path: 'dots.outlineColor.light', label: 'Dot outline on street map', type: 'color' },
+    { path: 'dots.outsideRingColor', label: 'Dimmed dots outside a ring', type: 'color' },
+  ] },
+  { group: 'Rings and selection', fields: [
+    { path: 'selection.ringColor', label: 'Selected crash ring', type: 'color' },
+    { path: 'selection.ringWidth', label: 'Selected ring width', type: 'num', min: 0.5, max: 6, step: 0.1 },
+    { path: 'pin.fillColor', label: 'Pin ring fill', type: 'color' },
+    { path: 'pin.lineColor', label: 'Pin ring edge', type: 'color' },
+    { path: 'pin.lineWidth', label: 'Pin ring width', type: 'num', min: 0.5, max: 6, step: 0.1 },
+    { path: 'stateLines.color.dark', label: 'State lines on dark map', type: 'color' },
+    { path: 'stateLines.color.light', label: 'State lines on street map', type: 'color' },
+  ] },
+  { group: 'Lens', fields: [
+    { path: 'lens.enabled', label: 'Enable the cursor lens', type: 'bool' },
+    { path: 'lens.hideOnTouchDevices', label: 'Hide the lens on phones', type: 'bool' },
+    { path: 'lens.followDelayMs', label: 'Lens follow delay in ms', type: 'num', min: 0, max: 400, step: 10 },
+  ] },
+  { group: 'Route check', fields: [
+    { path: 'route.baseColor', label: 'Route line', type: 'color' },
+    { path: 'route.tollColors.low', label: 'Least deadly stretch', type: 'color' },
+    { path: 'route.tollColors.medium', label: 'Middling stretch', type: 'color' },
+    { path: 'route.tollColors.high', label: 'Bad stretch', type: 'color' },
+    { path: 'route.tollColors.worst', label: 'Worst stretch', type: 'color' },
+    { path: 'route.lineWidth', label: 'Route line width', type: 'num', min: 1, max: 10, step: 0.5 },
+  ] },
+  { group: 'Interface colours', fields: [
+    { path: 'theme.--bg', label: 'Page background', type: 'color' },
+    { path: 'theme.--panel', label: 'Panel background', type: 'color' },
+    { path: 'theme.--line', label: 'Panel borders', type: 'color' },
+    { path: 'theme.--txt', label: 'Main text', type: 'color' },
+    { path: 'theme.--dim', label: 'Secondary text', type: 'color' },
+    { path: 'theme.--faint', label: 'Faint text', type: 'color' },
+    { path: 'theme.--ember', label: 'Accent, ember', type: 'color' },
+    { path: 'theme.--ember-hi', label: 'Accent, bright', type: 'color' },
+    { path: 'theme.--amber', label: 'Amber highlight', type: 'color' },
+    { path: 'theme.--blood', label: 'Blood red', type: 'color' },
+  ] },
+  { group: 'Timing', fields: [
+    { path: 'interface.toastSeconds', label: 'Message duration in seconds', type: 'num', min: 1, max: 12, step: 0.2 },
+    { path: 'performance.statsRefreshDelayMs', label: 'Counter refresh in ms', type: 'num', min: 0, max: 600, step: 20 },
+    { path: 'performance.yearSliderDelayMs', label: 'Year slider delay in ms', type: 'num', min: 0, max: 1000, step: 50 },
+    { path: 'interface.searchDelayMs', label: 'Search delay in ms', type: 'num', min: 0, max: 800, step: 20 },
+  ] },
+];
+
+function getPath(obj, path) {
+  return path.split('.').reduce((o, k) => (o == null ? o : o[k]), obj);
+}
+
+function setPath(obj, path, val) {
+  const ks = path.split('.');
+  let o = obj;
+  for (let i = 0; i < ks.length - 1; i++) {
+    if (typeof o[ks[i]] !== 'object' || o[ks[i]] === null) o[ks[i]] = {};
+    o = o[ks[i]];
+  }
+  o[ks[ks.length - 1]] = val;
+}
+
+function parseColor(v) {
+  const str = String(v).trim();
+  let m = str.match(/^#([0-9a-f]{6})$/i);
+  if (m) return { hex: ('#' + m[1]).toLowerCase(), a: 1 };
+  m = str.match(/^#([0-9a-f]{3})$/i);
+  if (m) {
+    const c = m[1];
+    return { hex: ('#' + c[0] + c[0] + c[1] + c[1] + c[2] + c[2]).toLowerCase(), a: 1 };
+  }
+  m = str.match(/^rgba?\(([^)]+)\)$/i);
+  if (m) {
+    const p = m[1].split(',').map((x) => parseFloat(x.trim()));
+    const hx = (n) => Math.max(0, Math.min(255, Math.round(n || 0))).toString(16).padStart(2, '0');
+    return { hex: '#' + hx(p[0]) + hx(p[1]) + hx(p[2]), a: p.length > 3 ? p[3] : 1 };
+  }
+  return { hex: '#000000', a: 1 };
+}
+
+function makeColor(hex, a) {
+  if (a >= 0.999) return hex;
+  const n = parseInt(hex.slice(1), 16);
+  return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255)
+    + ',' + Math.round(a * 1000) / 1000 + ')';
+}
+
+function applyTheme() {
+  const r = document.documentElement;
+  const t = SET.theme || {};
+  for (const k of Object.keys(t)) r.style.setProperty(k, t[k]);
+}
+
+function applyLiveSettings() {
+  applyTheme();
+  const map = S.map;
+  if (!map || !S.layersReady) return;
+  const T = theme();
+  const setP = (layer, prop, val) => {
+    if (map.getLayer(layer)) map.setPaintProperty(layer, prop, val);
+  };
+  for (const id of ['pts', 'pts-out']) {
+    if (map.getLayer(id)) map.setLayerZoomRange(id, dotZoom(), 24);
+  }
+  setP('pts', 'circle-color', ptsColor());
+  setP('pts', 'circle-radius', ptsRadius());
+  setP('pts', 'circle-stroke-width', ptsStrokeW());
+  setP('pts', 'circle-stroke-color', T.ptStroke);
+  setP('pts', 'circle-opacity', S.lens ? SET.dots.maxOpacity : ptsOpacity());
+  setP('pts', 'circle-stroke-opacity', S.lens ? 1 : ptsStrokeOpacity());
+  setP('pts-out', 'circle-color', SET.dots.outsideRingColor);
+  setP('pts-out', 'circle-radius', ptsRadius());
+  setP('pts-out', 'circle-opacity', SET.dots.outsideRingOpacity);
+  setP('mpts', 'circle-color', ptsColor());
+  setP('mpts', 'circle-radius', ptsRadius());
+  setP('mpts', 'circle-stroke-width', ptsStrokeW());
+  setP('mpts', 'circle-stroke-color', T.ptStroke);
+  setP('mpts', 'circle-opacity', SET.dots.maxOpacity);
+  setP('sel-ring', 'circle-radius', selRadius());
+  setP('sel-ring', 'circle-stroke-width', SET.selection.ringWidth);
+  setP('sel-ring', 'circle-stroke-color', SET.selection.ringColor);
+  setP('state-lines', 'line-color', T.stateLine);
+  setP('state-lines', 'line-width', stateWidth());
+  setP('ring-fill', 'fill-color', SET.pin.fillColor);
+  setP('ring-line', 'line-color', SET.pin.lineColor);
+  setP('ring-line', 'line-width', SET.pin.lineWidth);
+  setP('route-case', 'line-color', SET.route.casingColor);
+  setP('route-case', 'line-width', SET.route.casingWidth);
+  setP('route-line', 'line-width', SET.route.lineWidth);
+  if (!S.route) setP('route-line', 'line-color', SET.route.baseColor);
+  if (!SET.lens.enabled && S.lens) setLens(false);
+  $('lens-btn').hidden = !SET.lens.enabled || (SET.lens.hideOnTouchDevices && IS_TOUCH);
+  refreshViewport();
+}
+
+function saveOverrides() {
+  try { localStorage.setItem(LS_SET, JSON.stringify(OVERRIDES)); } catch (e) { }
+}
+
+function changeSetting(path, val) {
+  setPath(OVERRIDES, path, val);
+  setPath(SET, path, val);
+  saveOverrides();
+  if (path === 'basemap.start' && val !== S.base) setBase(val);
+  applyLiveSettings();
+}
+
+function buildSettings() {
+  const box = $('set-body');
+  box.innerHTML = '';
+  for (const grp of SCHEMA) {
+    const h = document.createElement('h3');
+    h.textContent = grp.group;
+    box.appendChild(h);
+    for (const f of grp.fields) {
+      const row = document.createElement('div');
+      row.className = 'set-row';
+      const lab = document.createElement('label');
+      lab.textContent = f.label;
+      row.appendChild(lab);
+      const val = getPath(SET, f.path);
+      if (f.type === 'color') {
+        const wrap = document.createElement('div');
+        wrap.className = 'set-color';
+        const c = parseColor(val);
+        const sw = document.createElement('input');
+        sw.type = 'color';
+        sw.value = c.hex;
+        const al = document.createElement('input');
+        al.type = 'range';
+        al.min = '0';
+        al.max = '1';
+        al.step = '0.01';
+        al.value = String(c.a);
+        al.setAttribute('aria-label', f.label + ' opacity');
+        const push = () => changeSetting(f.path, makeColor(sw.value, Number(al.value)));
+        sw.addEventListener('input', push);
+        al.addEventListener('input', push);
+        wrap.appendChild(sw);
+        wrap.appendChild(al);
+        row.appendChild(wrap);
+      } else if (f.type === 'bool') {
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = !!val;
+        cb.addEventListener('change', () => changeSetting(f.path, cb.checked));
+        row.appendChild(cb);
+      } else if (f.type === 'select') {
+        const sel = document.createElement('select');
+        for (const o of f.options) {
+          const op = document.createElement('option');
+          op.value = o;
+          op.textContent = o;
+          sel.appendChild(op);
+        }
+        sel.value = String(val);
+        sel.addEventListener('change', () => changeSetting(f.path, sel.value));
+        row.appendChild(sel);
+      } else {
+        const wrap = document.createElement('div');
+        wrap.className = 'set-num';
+        const rg = document.createElement('input');
+        rg.type = 'range';
+        rg.min = String(f.min);
+        rg.max = String(f.max);
+        rg.step = String(f.step);
+        rg.value = String(val);
+        rg.setAttribute('aria-label', f.label);
+        const out = document.createElement('span');
+        out.textContent = String(val);
+        rg.addEventListener('input', () => {
+          out.textContent = rg.value;
+          changeSetting(f.path, Number(rg.value));
+        });
+        wrap.appendChild(rg);
+        wrap.appendChild(out);
+        row.appendChild(wrap);
+      }
+      box.appendChild(row);
+    }
+  }
+}
+
+function resetSettings() {
+  OVERRIDES = {};
+  SET = deepMerge(FILE_SET, {});
+  try { localStorage.removeItem(LS_SET); } catch (e) { }
+  applyLiveSettings();
+  buildSettings();
+  toast('Settings back to their defaults.');
+}
+
+function copySettings() {
+  const txt = 'window.H2H_SETTINGS = '
+    + JSON.stringify(deepMerge(FILE_SET, OVERRIDES), null, 2) + ';';
+  const ta = $('set-out');
+  ta.value = txt;
+  ta.hidden = false;
+  ta.focus();
+  ta.select();
+  const ok = () => toast('Copied. Paste it into assets/js/settings.js to keep it for everyone.');
+  const manual = () => toast('Select the text below and copy it yourself.');
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(txt).then(ok).catch(manual);
+    return;
+  }
+  try {
+    if (document.execCommand('copy')) ok(); else manual();
+  } catch (e) { manual(); }
 }
