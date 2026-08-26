@@ -1,97 +1,91 @@
 # Highway to Hell
 
-**Every fatal crash in America, 2022–2024. Every road wears its toll.**
+**Every fatal crash on American roads with a known location, 2001–2024. Every road wears its toll.**
 
-A single-page map of the 122,450 people killed in 112,975 motor-vehicle crashes
-recorded by NHTSA's [Fatality Analysis Reporting System (FARS)](https://www.nhtsa.gov/research-data/fatality-analysis-reporting-system-fars).
-Zoomed out it's a heat field; mid-zoom circles total the deaths inside them; zoomed in,
-every named road shows **deaths\crashes** for the current view, every dot is a crash,
-and tapping a road label isolates that road nationwide.
+A single-page map of the **898,888 people killed in 821,145 crashes** recorded by NHTSA's
+[Fatality Analysis Reporting System (FARS)](https://www.nhtsa.gov/research-data/fatality-analysis-reporting-system-fars).
+Zoomed out it's a heat field; inside a state every named road shows **deaths\crashes**
+for the view, every dot is a crash, and tapping a dot opens the full case file —
+date and time, conditions, every vehicle, every person.
 
-![National heat map](docs/screenshot-national.png)
+![Street level — every road numbered](docs/screenshot-street.png)
 
-| Street level — every road numbered | Mobile |
-| --- | --- |
-| ![Street level](docs/screenshot-street.png) | ![Mobile](docs/screenshot-mobile.png) |
+## What it does
 
-Pin a spot — search a place or use your location — and everything scopes to a
-1–10&nbsp;mile ring around it:
+- **The national burn** — a pre-binned heat field of all 24 years, filterable by
+  year range with the histogram slider (bars are deaths per year).
+- **One state at a time** — zooming into a state lazy-loads its crash pack, so the
+  map stays fast; roads re-aggregate their `deaths\crashes` labels on every move.
+- **The full record** — tap a crash for the FARS case file: conditions, harmful
+  event, each vehicle (year/make/model, speed, rollover, fire, hit-and-run), each
+  person (age, role, restraint, ejection, outcome). Older years show what the era's
+  coding supports.
+- **Your corner** — search a place or hit the crosshair: a draggable pin with a
+  1/3/5/10-mile ring scopes everything to it. Pin and radius live in the URL and
+  localStorage.
+- **Route check** — give it a drive (A → B): it pulls the route from the open
+  [OSRM](http://project-osrm.org) router, counts every death within a quarter mile
+  of the road, colors the route by how deadly each stretch has been, and lists the
+  stretches where you should be extra careful.
 
-![Radius ring around a pinned location](docs/screenshot-pin.png)
+  ![Route check](docs/screenshot-route.png)
+- **Roads nationally** — the search box also finds roads; picking one isolates its
+  crashes coast to coast (`I-40` → its whole 24-year toll).
+- **Two basemaps** — CARTO Dark Matter by default, an OpenFreeMap street style (◐)
+  when you need names and buildings.
 
 ## How it works
 
-Pure static site — no backend, no build step, no API keys. Ready for GitHub Pages.
+Pure static site — no backend, no build step, no API keys. GitHub Pages serves it.
 
-- **Data** — `data/fars.json` (4.4 MB raw, ~1.3 MB gzipped over the wire) is a
-  column-oriented pack of all 112,975 crashes: quantized lat/lon, deaths, year,
-  month, road-name index, state index. Built from the FARS *National CSV*
-  `accident.csv` files by `scripts/build_data.py`.
-- **Map** — [MapLibre GL JS](https://maplibre.org) (vendored, `assets/vendor/`)
-  over CARTO's Dark Matter basemap. The style JSON and all glyph files are
-  self-hosted, so the crash layers, numbers, and road labels render even if the
-  tile CDN is unreachable — only basemap tiles come from CARTO at runtime.
-- **Road numbers** — crashes are grouped by the FARS trafficway identifier
-  (`TWAY_ID`, lightly cleaned of state inventory codes). On every map move the
-  viewport's crashes are re-aggregated per road and the top roads get a
-  `deaths\crashes` label anchored to the crash nearest the group's centroid, so
-  labels sit on the road itself.
-- **Your corner** — the map is built to be pointed at a place. Search a town or
-  address (open [Photon](https://photon.komoot.io) geocoder, no key) or hit the
-  crosshair to use device location: a draggable pin drops with a 1/3/5/10-mile
-  ring, the stats and every road label re-scope to what happened inside the
-  ring, and crashes outside it dim to context. The pin survives reloads
-  (localStorage) and lives in the URL (`?p=lat,lon&r=5`), so a spot can be
-  shared as a link. Device location is only used to move the map; place-search
-  queries go to photon.komoot.io.
-- **Search** — the same box finds roads in the dataset (`I-40`, `US-1`,
-  `SR-99`): pick one to see its national toll and isolate its crashes; with a
-  pin active, road numbers scope to the ring. Year chips re-filter everything
-  live.
+| piece | file(s) | size |
+| --- | --- | --- |
+| National heat grid + meta | `data/boot.json` | ~5 MB (≈1.6 MB gzipped) |
+| Per-state crash packs | `data/s/<fips>.json` | 30 MB total, lazy-loaded |
+| Road search index | `data/roads.json` | ~5 MB, lazy-loaded |
+| Per-crash case files | `data/d/<year>_<fips>.json` | 173 MB total, loaded per tap |
 
-## Deploying on GitHub Pages
+The frontend (MapLibre GL, vendored) never builds large feature sets synchronously —
+state packs hydrate in time-sliced chunks, so the UI thread never freezes, verified
+with CPU-throttled mobile runs. The basemap style, glyphs, and fonts are self-hosted;
+only basemap tiles, place search ([Photon](https://photon.komoot.io)), and route
+requests (OSRM) leave the site at runtime.
 
-Two options:
-
-1. **Deploy from branch** (simplest): repo *Settings → Pages → Source: Deploy from
-   a branch*, pick the default branch and `/ (root)`. Done.
-2. **GitHub Actions**: *Settings → Pages → Source: GitHub Actions*. The included
-   workflow (`.github/workflows/deploy.yml`) publishes the site on every push.
-
-Everything is path-relative, so it works at `https://<user>.github.io/<repo>/`.
-
-## Refreshing the data
-
-When NHTSA publishes a new FARS year (annual file lands ~18 months after
-year-end):
+## Rebuilding the data
 
 ```bash
-python3 scripts/build_data.py --years 2023 2024 2025
+python3 scripts/build_data.py            # 2001–2024, downloads FARS zips as needed
 ```
 
-The script downloads `FARS<year>NationalCSV.zip` from `static.nhtsa.gov` (cached
-in `.cache/fars/`), keeps crashes with usable coordinates, and rewrites
-`data/fars.json`. Update the year range shown in `index.html` if it changes.
-`scripts/build_states.py` regenerates the state-outline fallback layer from
-[us-atlas](https://github.com/topojson/us-atlas).
+`scripts/build_data.py` reads the FARS National CSV `accident`, `vehicle`, and
+`person` files per year (cached in `.cache/fars/`), harvests code→label mappings
+from the modern files to back-fill labels for older years, gates fields whose codes
+were renumbered (WEATHER and MAN_COLL in 2010, old two-digit speeds), cleans state
+roadway-inventory noise out of road names, and writes the boot grid, state packs,
+road index, and detail shards. `scripts/build_states.py` regenerates the state
+outlines.
+
+Coordinates exist in FARS from 2001 (81.6% coverage that year, ≥92% from 2002,
+≈99.5% in recent years); 1999–2000 have none, which is why the map starts at 2001.
+22,385 crashes (2.7%) with unusable coordinates are excluded from the map.
 
 ## Reading the numbers honestly
 
-- FARS counts deaths within 30 days of a public-road crash — the federal
-  definition of a traffic fatality.
-- Road names are whatever each state reported. The same highway can appear under
-  several names ("I-40", "I-40 E", "I-40/OLD ROUTE 66"), and a road crossing
-  state lines counts each state's stretch under the same name.
-- 513 crashes (0.5%) with unknown coordinates are excluded from the map but not
-  from FARS's official totals.
-- More deaths on a road usually means more traffic, not necessarily more danger
-  per mile. This map shows *where people died*, not a per-mile risk ranking.
+- FARS counts deaths within 30 days of a public-road crash — the federal definition.
+- Road names are whatever each state reported; the same highway can appear under
+  several names, and a road crossing state lines counts each state's stretch.
+- More deaths on a road usually means more traffic, not necessarily more danger per
+  mile. The route check shows where people died along your drive, not a per-mile
+  risk ranking.
 
 ## Credits & licenses
 
 - Crash data: NHTSA FARS — US Government work, public domain.
-- Basemap: © [OpenStreetMap](https://www.openstreetmap.org/copyright)
-  contributors, © [CARTO](https://carto.com/attributions) (Dark Matter style).
+- Basemaps: © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors,
+  © [CARTO](https://carto.com/attributions) (Dark Matter),
+  © [OpenFreeMap](https://openfreemap.org) (Liberty).
+- Routing: [OSRM](http://project-osrm.org) demo server. Geocoding:
+  [Photon](https://photon.komoot.io) by komoot.
 - Renderer: MapLibre GL JS, BSD-3-Clause (`assets/vendor/MAPLIBRE-LICENSE.txt`).
 - Fonts: Anton, Barlow, Barlow Condensed (SIL OFL, self-hosted); map glyphs
   Montserrat, Open Sans, Noto Sans (SIL OFL / Apache-2.0).
