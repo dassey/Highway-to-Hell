@@ -1,10 +1,13 @@
 'use strict';
 
 const QS = new URLSearchParams(location.search);
-const BOOT_URL = 'data/boot.json?v=4';
-const ROADS_URL = 'data/roads.json?v=4';
+const BOOT_URL = 'data/boot.json?v=6';
+const ROADS_URL = 'data/roads.json?v=6';
 const STATES_URL = 'data/us-states.json?v=1';
-const packUrl = (fips) => 'data/s/' + fips + '.json?v=4';
+const packUrl = (fips) => 'data/s/' + fips + '.json?v=6';
+const TILE_URL = new URL('data/t/', location.href).href + '{z}/{x}/{y}.pbf?v=6';
+const TILE_MIN = 8;
+const TILE_MAX = 9;
 const STYLE_URLS = {
   dark: QS.get('style') || 'assets/vendor/dark-matter-style.json',
   light: QS.get('styleLight') || 'assets/vendor/liberty-style.json',
@@ -15,8 +18,6 @@ const OSRM_BASE = QS.get('osrm') || 'https://router.project-osrm.org';
 const ROUTE_BUF_MI = 0.25;
 const ROUTE_CELL = 0.08;
 const US_BOUNDS = [[-125.6, 23.6], [-66.0, 49.8]];
-const STATE_ZOOM = 5.4;
-const PACK_ZOOM = 5.0;
 const PACK_CACHE = matchMedia('(pointer: coarse)').matches ? 3 : 6;
 const BS = String.fromCharCode(92);
 const DC = 'deaths' + BS + 'crashes';
@@ -29,12 +30,18 @@ const MONTHS = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const DOW = ['', 'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-const PTS_OPACITY = ['interpolate', ['linear'], ['zoom'], 6.8, 0, 8.8, 0.92];
-const PTS_STROKE_OPACITY = ['interpolate', ['linear'], ['zoom'], 6.8, 0, 8.8, 1];
+const PTS_OPACITY = ['interpolate', ['linear'], ['zoom'], 8, 0.35, 8.6, 0.92];
+const PTS_STROKE_OPACITY = ['interpolate', ['linear'], ['zoom'], 8, 0, 9.2, 1];
+const PTS_RADIUS = ['interpolate', ['linear'], ['zoom'],
+  8, ['+', 1.1, ['*', 0.5, ['get', 'f']]],
+  11, ['+', 3.2, ['*', 1.5, ['get', 'f']]],
+  15, ['+', 5, ['*', 2, ['get', 'f']]]];
+const PTS_COLOR = ['interpolate', ['linear'], ['get', 'f'],
+  1, '#b3220f', 2, '#e0401a', 4, '#ff702a', 8, '#ffa542'];
 const FEAT_CHUNK = 12000;
 const LENS_RADII = [5, 10, 25, 50];
 const LENS_DEFAULT = 25;
-const LENS_MIN_ZOOM = 4;
+const LENS_MIN_ZOOM = TILE_MIN;
 
 const THEMES = {
   dark: {
@@ -83,7 +90,6 @@ const S = window.__S = {
   grid: null,
   gridW: null,
   gridN: null,
-  gridFC: null,
   packs: new Map(),
   modeFeats: [],
   dotsKey: 'none',
@@ -188,17 +194,6 @@ function computeGrid() {
     w[g.ci[i]] += g.cw[i];
     n[g.ci[i]] += g.cn[i];
   }
-  const feats = [];
-  for (let b = 0; b < g.nb; b++) {
-    if (!w[b]) continue;
-    feats.push({
-      type: 'Feature',
-      geometry: { type: 'Point', coordinates: [g.lonC[b], g.latC[b]] },
-      properties: { w: w[b] },
-    });
-  }
-  S.gridFC = { type: 'FeatureCollection', features: feats };
-  return S.gridFC;
 }
 
 function yearOn(yi) { return yi >= S.yearLo && yi <= S.yearHi; }
@@ -328,32 +323,6 @@ function buildStateShapes(geo) {
   S.stateShapes = shapes;
 }
 
-function ringHas(ring, lng, lat) {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const xi = ring[i][0]; const yi = ring[i][1];
-    const xj = ring[j][0]; const yj = ring[j][1];
-    if ((yi > lat) !== (yj > lat)
-      && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
-  }
-  return inside;
-}
-
-function stateAt(lng, lat) {
-  for (const sh of S.stateShapes) {
-    if (lng < sh.minX || lng > sh.maxX || lat < sh.minY || lat > sh.maxY) continue;
-    for (const poly of sh.polys) {
-      if (!ringHas(poly[0], lng, lat)) continue;
-      let inHole = false;
-      for (let h = 1; h < poly.length; h++) {
-        if (ringHas(poly[h], lng, lat)) { inHole = true; break; }
-      }
-      if (!inHole) return sh.si;
-    }
-  }
-  return -1;
-}
-
 function ringFips(pin) {
   const [[minX, minY], [maxX, maxY]] = ringBounds(pin);
   const out = [];
@@ -364,26 +333,8 @@ function ringFips(pin) {
   return out;
 }
 
-function pinKey() {
-  const p = S.pin;
-  return 'pin:' + p.lat.toFixed(5) + ',' + p.lng.toFixed(5) + ',' + p.mi;
-}
-
 function desiredDotsKey() {
-  if (S.lens) {
-    if (!S.lens.over || S.lens.lng == null
-      || S.map.getZoom() < LENS_MIN_ZOOM) return 'none';
-    const fl = ringFips(S.lens);
-    return fl.length ? 'lens:' + fl.join('+') : 'none';
-  }
-  if (S.pin) return pinKey();
-  const map = S.map;
-  if (map.getZoom() >= PACK_ZOOM) {
-    const c = map.getCenter();
-    const si = stateAt(c.lng, c.lat);
-    if (si >= 0) return 'state:' + si;
-  }
-  return 'none';
+  return S.roadSel ? 'road' : (S.route ? 'route' : 'none');
 }
 
 function setDots(feats, key) {
@@ -397,29 +348,7 @@ function setDots(feats, key) {
 
 function syncData() {
   if (!S.layersReady || S.roadSel || S.route) return;
-  const key = desiredDotsKey();
-  if (key === S.dotsKey) return;
-  if (key === 'none') {
-    setDots([], 'none');
-    return;
-  }
-  if (key.indexOf('state:') === 0) {
-    const si = Number(key.slice(6));
-    ensurePack(S.d.stfips[si]).then((pk) => {
-      if (S.roadSel || desiredDotsKey() !== key || S.dotsKey === key) return;
-      setDots(pk.feats, key);
-    }).catch(() => { });
-    refreshViewport();
-    return;
-  }
-  const fipsList = ringFips(S.lens || S.pin);
-  Promise.all(fipsList.map(ensurePack)).then((pks) => {
-    if (S.roadSel || desiredDotsKey() !== key || S.dotsKey === key) return;
-    let feats = [];
-    for (const pk of pks) feats = feats.concat(pk.feats);
-    setDots(feats, key);
-  }).catch(() => { });
-  refreshViewport();
+  if (S.dotsKey !== 'none') setDots([], 'none');
 }
 
 function yearClauses() {
@@ -446,25 +375,22 @@ function applyFilters() {
   } else if (yf.length) {
     pts = ['all', ...yf];
   }
-  if (map.getLayer('pts')) map.setFilter('pts', pts);
-  if (map.getLayer('pts-out')) map.setFilter('pts-out', out);
+  const mode = !!(S.roadSel || S.route);
+  if (map.getLayer('pts')) {
+    map.setFilter('pts', pts);
+    map.setLayoutProperty('pts', 'visibility', mode ? 'none' : 'visible');
+  }
+  if (map.getLayer('pts-out')) {
+    map.setFilter('pts-out', mode ? ['boolean', false] : out);
+  }
+  if (map.getLayer('mpts')) {
+    map.setFilter('mpts', mode && yf.length ? ['all', ...yf] : (mode ? null : ['boolean', false]));
+    map.setLayoutProperty('mpts', 'visibility', mode ? 'visible' : 'none');
+  }
 }
 
-function roadDisplay(on) {
-  const map = S.map;
-  if (!map.getLayer('pts')) return;
-  if (map.getLayer('heat')) {
-    map.setLayoutProperty('heat', 'visibility', on ? 'none' : 'visible');
-  }
-  if (on) {
-    map.setLayerZoomRange('pts', 2, 24);
-    map.setPaintProperty('pts', 'circle-opacity', 0.92);
-    map.setPaintProperty('pts', 'circle-stroke-opacity', 1);
-  } else {
-    map.setLayerZoomRange('pts', 6.6, 24);
-    map.setPaintProperty('pts', 'circle-opacity', PTS_OPACITY);
-    map.setPaintProperty('pts', 'circle-stroke-opacity', PTS_STROKE_OPACITY);
-  }
+function roadDisplay() {
+  applyFilters();
 }
 
 function ringPolygon(pin) {
@@ -549,7 +475,11 @@ function initMap(baseStyle) {
 
   map.on('moveend', () => {
     syncData();
-    refreshViewport();
+    scheduleRefresh();
+  });
+
+  map.on('sourcedata', (e) => {
+    if (e.sourceId === 'tiles' && e.isSourceLoaded) scheduleRefresh();
   });
 }
 
@@ -582,7 +512,13 @@ function addLayers() {
     }, under);
   }
 
-  map.addSource('grid', { type: 'geojson', data: S.gridFC });
+  map.addSource('tiles', {
+    type: 'vector',
+    tiles: [TILE_URL],
+    minzoom: TILE_MIN,
+    maxzoom: TILE_MAX,
+  });
+
   map.addSource('route', {
     type: 'geojson',
     lineMetrics: true,
@@ -624,31 +560,6 @@ function addLayers() {
   });
 
   map.addLayer({
-    id: 'heat',
-    type: 'heatmap',
-    source: 'grid',
-    maxzoom: 9,
-    paint: {
-      'heatmap-weight': ['interpolate', ['linear'], ['get', 'w'],
-        1, 0.006, 10, 0.05, 100, 0.5, 1000, 5],
-      'heatmap-intensity': ['interpolate', ['linear'], ['zoom'],
-        2, 0.22, 3, 0.36, 4, 0.7, 6, 1.0, 8, 1.4],
-      'heatmap-radius': ['interpolate', ['linear'], ['zoom'],
-        2, 4, 3, 8, 4, 17, 6, 26, 8, 36, 9, 44],
-      'heatmap-opacity': ['interpolate', ['linear'], ['zoom'],
-        6.5, 0.95, 8.6, 0],
-      'heatmap-color': ['interpolate', ['linear'], ['heatmap-density'],
-        0, 'rgba(0,0,0,0)',
-        0.1, 'rgba(58,5,5,0.5)',
-        0.3, '#7a0e0e',
-        0.55, '#c22815',
-        0.78, '#ff5a1f',
-        0.93, '#ffa542',
-        1, '#ffe0a3'],
-    },
-  }, under);
-
-  map.addLayer({
     id: 'route-case',
     type: 'line',
     source: 'route',
@@ -670,36 +581,47 @@ function addLayers() {
   map.addLayer({
     id: 'pts-out',
     type: 'circle',
-    source: 'dots',
+    source: 'tiles',
+    'source-layer': 'crashes',
     filter: ['boolean', false],
-    minzoom: 6.8,
+    minzoom: TILE_MIN,
     paint: {
       'circle-color': '#7c2013',
-      'circle-radius': ['interpolate', ['linear'], ['zoom'],
-        7, ['+', 1.4, ['*', 0.9, ['get', 'f']]],
-        11, ['+', 2.6, ['*', 1.2, ['get', 'f']]],
-        15, ['+', 4, ['*', 1.6, ['get', 'f']]]],
-      'circle-opacity': 0.28,
+      'circle-radius': PTS_RADIUS,
+      'circle-opacity': 0.22,
     },
   }, under);
 
   map.addLayer({
     id: 'pts',
     type: 'circle',
-    source: 'dots',
-    minzoom: 6.6,
+    source: 'tiles',
+    'source-layer': 'crashes',
+    minzoom: TILE_MIN,
     paint: {
-      'circle-color': ['interpolate', ['linear'], ['get', 'f'],
-        1, '#b3220f', 2, '#e0401a', 4, '#ff702a', 8, '#ffa542'],
-      'circle-radius': ['interpolate', ['linear'], ['zoom'],
-        4, ['+', 1.2, ['*', 0.7, ['get', 'f']]],
-        7, ['+', 1.8, ['*', 1.1, ['get', 'f']]],
-        11, ['+', 3.2, ['*', 1.5, ['get', 'f']]],
-        15, ['+', 5, ['*', 2, ['get', 'f']]]],
-      'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 7, 0.4, 11, 1.4],
+      'circle-color': PTS_COLOR,
+      'circle-radius': PTS_RADIUS,
+      'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 8.6, 0.4, 11, 1.4],
       'circle-stroke-color': T.ptStroke,
       'circle-opacity': PTS_OPACITY,
       'circle-stroke-opacity': PTS_STROKE_OPACITY,
+    },
+  }, under);
+
+  map.addLayer({
+    id: 'mpts',
+    type: 'circle',
+    source: 'dots',
+    paint: {
+      'circle-color': PTS_COLOR,
+      'circle-radius': ['interpolate', ['linear'], ['zoom'],
+        4, ['+', 1.2, ['*', 0.7, ['get', 'f']]],
+        8, ['+', 1.8, ['*', 1.1, ['get', 'f']]],
+        11, ['+', 3.2, ['*', 1.5, ['get', 'f']]],
+        15, ['+', 5, ['*', 2, ['get', 'f']]]],
+      'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 8, 0.4, 11, 1.4],
+      'circle-stroke-color': T.ptStroke,
+      'circle-opacity': 0.92,
     },
   }, under);
 
@@ -722,13 +644,15 @@ function initInteractions() {
 
   map.on('click', (e) => {
     if (!S.layersReady || !map.getLayer('pts')) return;
-    const fs = map.queryRenderedFeatures(e.point, { layers: ['pts'] });
+    const hit = ['pts', 'mpts'].filter((id) => map.getLayer(id)
+      && map.getLayoutProperty(id, 'visibility') !== 'none');
+    const fs = hit.length ? map.queryRenderedFeatures(e.point, { layers: hit }) : [];
     if (fs.length) {
       openDetail(fs[0].properties, fs[0].geometry.coordinates);
       return;
     }
-    if (map.getZoom() < STATE_ZOOM && !S.roadSel && !S.pin && !S.lens && !S.route) {
-      map.easeTo({ center: e.lngLat, zoom: 6.4, duration: 900 });
+    if (map.getZoom() < TILE_MIN && !S.roadSel && !S.pin && !S.lens && !S.route) {
+      map.easeTo({ center: e.lngLat, zoom: TILE_MIN + 0.4, duration: 900 });
     }
   });
 
@@ -749,6 +673,56 @@ function initInteractions() {
   map.on('mouseleave', 'pts', () => { if (!S.lens) map.getCanvas().style.cursor = ''; });
 }
 
+let refreshTimer = 0;
+
+function scheduleRefresh() {
+  if (refreshTimer) return;
+  refreshTimer = setTimeout(() => {
+    refreshTimer = 0;
+    refreshViewport();
+  }, 120);
+}
+
+function countRendered(test) {
+  const map = S.map;
+  const layers = [];
+  if (map.getLayer('pts') && map.getLayoutProperty('pts', 'visibility') !== 'none') {
+    layers.push('pts');
+  }
+  if (map.getLayer('mpts') && map.getLayoutProperty('mpts', 'visibility') !== 'none') {
+    layers.push('mpts');
+  }
+  if (!layers.length) return [0, 0];
+  const fs = map.queryRenderedFeatures({ layers });
+  const seen = new Set();
+  let d = 0; let c = 0;
+  for (const ft of fs) {
+    const p = ft.properties;
+    const k = p.s + ':' + p.y + ':' + p.c;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    if (test) {
+      const g = ft.geometry.coordinates;
+      if (!test(g[0], g[1])) continue;
+    }
+    d += p.f;
+    c += 1;
+  }
+  return [d, c];
+}
+
+function gridCount(inView) {
+  const g = S.grid;
+  let d = 0; let c = 0;
+  for (let i = 0; i < g.nb; i++) {
+    if (!S.gridN[i]) continue;
+    if (!inView(g.latC[i], g.lonC[i])) continue;
+    d += S.gridW[i];
+    c += S.gridN[i];
+  }
+  return [d, c];
+}
+
 function refreshViewport() {
   if (!S.layersReady) return;
   const map = S.map;
@@ -762,117 +736,90 @@ function refreshViewport() {
     if (la < so || la > n) return false;
     return wrap ? !(lo < w && lo > e) : !(lo < w || lo > e);
   };
-  const inRing = S.pin ? makeInRing(S.pin) : null;
-  const test = (la, lo) => (inRing ? inRing(lo, la) : inView(la, lo));
 
-  const centerSi = z >= STATE_ZOOM && !S.pin && !S.route && !S.lens
-    ? stateAt(map.getCenter().lng, map.getCenter().lat)
-    : -1;
-
-  let totD = 0; let totC = 0; let pending = false;
+  const setNums = (d, c) => {
+    $('stat-d').textContent = fmt(d);
+    $('stat-c').textContent = fmt(c);
+  };
 
   if (S.lens) {
+    $('stats-kicker').textContent = 'WITHIN ' + S.lens.mi + ' MI OF THE CURSOR';
     if (!S.lens.over || S.lens.lng == null || z < LENS_MIN_ZOOM) {
       $('stat-d').textContent = '—';
       $('stat-c').textContent = '—';
-      $('stats-kicker').textContent = 'WITHIN ' + S.lens.mi + ' MI OF THE CURSOR';
       $('stats-sub').textContent = z < LENS_MIN_ZOOM
-        ? 'zoom in a little to use the lens'
+        ? 'zoom in to level ' + TILE_MIN + ' to use the lens'
         : 'move the cursor over the map';
       return;
     }
-    const key = desiredDotsKey();
-    pending = key !== 'none' && S.dotsKey !== key;
-    if (!pending) {
-      const inL = makeInRing(S.lens);
-      for (const ft of S.modeFeats) {
-        const p = ft.properties;
-        if (!yearOn(p.y)) continue;
-        const g = ft.geometry.coordinates;
-        if (!inL(g[0], g[1])) continue;
-        totD += p.f;
-        totC += 1;
-      }
-    }
-    $('stat-d').textContent = pending ? '…' : fmt(totD);
-    $('stat-c').textContent = pending ? '…' : fmt(totC);
-    $('stats-kicker').textContent = 'WITHIN ' + S.lens.mi + ' MI OF THE CURSOR';
-    $('stats-sub').textContent = pending
-      ? 'pulling this area…'
-      : DC + ' under the lens · scroll to zoom, esc to exit';
+    const [d, c] = countRendered(makeInRing(S.lens));
+    setNums(d, c);
+    $('stats-sub').textContent = DC + ' under the lens · esc to exit';
     return;
   }
 
   if (S.route) {
-    if (S.dotsKey !== 'route' || !S.route.hits) {
-      pending = true;
-    } else {
+    let d = 0; let c = 0;
+    const pending = S.dotsKey !== 'route' || !S.route.hits;
+    if (!pending) {
       for (const ft of S.modeFeats) {
-        const p = ft.properties;
-        if (!yearOn(p.y)) continue;
-        totD += p.f;
-        totC += 1;
+        if (!yearOn(ft.properties.y)) continue;
+        d += ft.properties.f;
+        c += 1;
       }
     }
-  } else if (S.roadSel || S.pin) {
-    const want = S.roadSel ? 'road' : pinKey();
-    if (S.dotsKey !== want) {
-      pending = true;
-    } else {
-      for (const ft of S.modeFeats) {
-        const p = ft.properties;
-        if (!yearOn(p.y)) continue;
-        const g = ft.geometry.coordinates;
-        if (!test(g[1], g[0])) continue;
-        totD += p.f;
-        totC += 1;
-      }
-    }
-  } else if (centerSi >= 0) {
-    const pk = loadedPack(S.d.stfips[centerSi]);
-    if (!pk) {
-      pending = true;
-    } else {
-      const { lat, lon, f, y } = pk;
-      for (let i = 0; i < lat.length; i++) {
-        if (!yearOn(y[i])) continue;
-        if (!inView(lat[i] / 1e5, lon[i] / 1e5)) continue;
-        totD += f[i];
-        totC += 1;
-      }
-    }
-  } else {
-    const g = S.grid;
-    for (let i = 0; i < g.nb; i++) {
-      if (!S.gridN[i]) continue;
-      if (!inView(g.latC[i], g.lonC[i])) continue;
-      totD += S.gridW[i];
-      totC += S.gridN[i];
-    }
-  }
-
-  $('stat-d').textContent = pending ? '…' : fmt(totD);
-  $('stat-c').textContent = pending ? '…' : fmt(totC);
-  if (S.route) {
+    $('stat-d').textContent = pending ? '…' : fmt(d);
+    $('stat-c').textContent = pending ? '…' : fmt(c);
     $('stats-kicker').textContent = 'ALONG THIS ROUTE';
     $('stats-sub').textContent = pending
       ? 'tracing the corridor…'
       : DC + ' within ¼ mi of the drive';
-  } else if (S.pin) {
-    $('stats-kicker').textContent = 'WITHIN ' + S.pin.mi + ' MI · ' + (S.pin.name || 'PINNED SPOT').toUpperCase();
-    $('stats-sub').textContent = pending
-      ? 'pulling this area…'
-      : DC + ' in the ring · drag the pin to move it';
-  } else if (centerSi >= 0) {
-    $('stats-kicker').textContent = S.d.states[centerSi].toUpperCase();
-    $('stats-sub').textContent = pending
-      ? 'pulling this state…'
-      : DC + (z >= 9
-        ? ' in view · tap a dot for the full record'
-        : ' in view · keep zooming for single crashes');
-  } else {
+    return;
+  }
+
+  if (S.roadSel) {
+    let d = 0; let c = 0;
+    const pending = S.dotsKey !== 'road';
+    if (!pending) {
+      for (const ft of S.modeFeats) {
+        if (!yearOn(ft.properties.y)) continue;
+        const g = ft.geometry.coordinates;
+        if (!inView(g[1], g[0])) continue;
+        d += ft.properties.f;
+        c += 1;
+      }
+    }
+    $('stat-d').textContent = pending ? '…' : fmt(d);
+    $('stat-c').textContent = pending ? '…' : fmt(c);
     $('stats-kicker').textContent = 'IN THIS VIEW';
-    $('stats-sub').textContent = DC + ' · zoom into a state to narrow it down';
+    $('stats-sub').textContent = pending
+      ? 'pulling this road…'
+      : DC + ' of this road on screen';
+    return;
+  }
+
+  if (S.pin) {
+    const [d, c] = countRendered(makeInRing(S.pin));
+    setNums(d, c);
+    $('stats-kicker').textContent = 'WITHIN ' + S.pin.mi + ' MI · '
+      + (S.pin.name || 'PINNED SPOT').toUpperCase();
+    $('stats-sub').textContent = z < TILE_MIN
+      ? 'zoom in to level ' + TILE_MIN + ' to count the ring'
+      : DC + ' in the ring · drag the pin to move it';
+    return;
+  }
+
+  if (z >= TILE_MIN) {
+    const [d, c] = countRendered((lo, la) => inView(la, lo));
+    setNums(d, c);
+    $('stats-kicker').textContent = 'IN THIS VIEW';
+    $('stats-sub').textContent = DC + ' · tap a dot for the full record';
+  } else {
+    const [d, c] = gridCount(inView);
+    setNums(d, c);
+    $('stats-kicker').textContent = 'IN THIS VIEW';
+    $('stats-sub').textContent = DC + ' · zoom in to level ' + TILE_MIN
+      + ' to see every crash';
   }
 }
 
@@ -907,15 +854,8 @@ function lensApply() {
 function lensDisplay(on) {
   const map = S.map;
   if (!map.getLayer('pts')) return;
-  if (on) {
-    map.setLayerZoomRange('pts', LENS_MIN_ZOOM, 24);
-    map.setPaintProperty('pts', 'circle-opacity', 0.92);
-    map.setPaintProperty('pts', 'circle-stroke-opacity', 1);
-  } else {
-    map.setLayerZoomRange('pts', 6.6, 24);
-    map.setPaintProperty('pts', 'circle-opacity', PTS_OPACITY);
-    map.setPaintProperty('pts', 'circle-stroke-opacity', PTS_STROKE_OPACITY);
-  }
+  map.setPaintProperty('pts', 'circle-opacity', on ? 0.92 : PTS_OPACITY);
+  map.setPaintProperty('pts', 'circle-stroke-opacity', on ? 1 : PTS_STROKE_OPACITY);
 }
 
 function setLens(on) {
@@ -1152,7 +1092,7 @@ function selectRoad(i) {
     let feats = [];
     for (const pk of pks) feats = feats.concat(roadFeatsFrom(pk, name));
     setDots(feats, 'road');
-    roadDisplay(true);
+    roadDisplay();
     applyFilters();
     updateRoadBanner(true);
   }).catch(() => {
@@ -1206,7 +1146,7 @@ function clearRoad() {
   if (!S.roadSel) return;
   S.roadSel = null;
   $('road-banner').hidden = true;
-  roadDisplay(false);
+  roadDisplay();
   applyFilters();
   S.dotsKey = 'cleared';
   syncData();
@@ -1423,8 +1363,8 @@ function setBase(base) {
       addLayers();
       S.layersReady = true;
       applyFilters();
-      if (S.roadSel && S.dotsKey === 'road') roadDisplay(true);
-      if (S.route && S.dotsKey === 'route') roadDisplay(true);
+      if (S.roadSel && S.dotsKey === 'road') roadDisplay();
+      if (S.route && S.dotsKey === 'route') roadDisplay();
       if (S.lens) {
         lensDisplay(true);
         S.map.getCanvas().style.cursor = 'crosshair';
@@ -1434,7 +1374,6 @@ function setBase(base) {
     });
   }).catch(() => toast('Could not load that basemap — staying on this one.'));
 }
-
 
 function geocodeOne(q) {
   return fetch(GEO_BASE + '/api/?q=' + encodeURIComponent(q) + '&limit=5&lang=en')
@@ -1649,8 +1588,7 @@ function applyRouteYears(first) {
   }
 
   setDots(feats, 'route');
-  roadDisplay(true);
-  if (S.map.getLayer('heat')) S.map.setLayoutProperty('heat', 'visibility', 'none');
+  roadDisplay();
 
   const spots = st.map((e, k) => ({ k, d: e.d, c: e.c, roads: e.roads }))
     .filter((e) => e.d > 0)
@@ -1715,10 +1653,7 @@ function clearRoute() {
   closePanel();
   const src = S.map.getSource('route');
   if (src) src.setData({ type: 'FeatureCollection', features: [] });
-  roadDisplay(false);
-  if (S.map.getLayer('heat') && !S.roadSel) {
-    S.map.setLayoutProperty('heat', 'visibility', 'visible');
-  }
+  roadDisplay();
   S.dotsKey = 'cleared';
   syncData();
   if (S.dotsKey === 'cleared') setDots([], 'none');
@@ -1767,8 +1702,6 @@ function initYearSlider() {
       S.yearHi = b;
       computeGrid();
       if (S.layersReady) {
-        const src = S.map.getSource('grid');
-        if (src) src.setData(S.gridFC);
         applyFilters();
         if (S.route) applyRouteYears();
         updateRoadBanner(true);

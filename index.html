@@ -12,7 +12,7 @@
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="assets/fonts/fonts.css">
 <link rel="stylesheet" href="assets/vendor/maplibre-gl.css">
-<link rel="stylesheet" href="assets/css/style.css?v=5">
+<link rel="stylesheet" href="assets/css/style.css?v=6">
 </head>
 <body>
 
@@ -88,7 +88,7 @@
     <button class="pin-clear" id="pin-clear" aria-label="Clear location pin" hidden>×</button>
   </div>
   <div class="stats-nums"><b id="stat-d">—</b><i>\</i><span id="stat-c">—</span></div>
-  <div class="stats-sub" id="stats-sub">deaths\crashes · zoom into a state to narrow it down</div>
+  <div class="stats-sub" id="stats-sub">deaths\crashes · zoom in to see every crash</div>
   <div class="radius-row" id="radius-row" hidden>
     <span class="radius-label">RADIUS</span>
     <button class="rchip" data-mi="1">1 mi</button>
@@ -119,13 +119,12 @@
 
     <h3>Reading the map</h3>
     <ul>
-      <li><span class="k k-heat"></span><div>Zoomed out, the glow is a heat field — the brighter it burns,
-        the more people died there. Every crash contributes to it.</div></li>
-      <li><span class="k k-dot"></span><div>Tap anywhere on the country, or keep zooming, and the field
-        resolves into individual crashes, one dot each, sized by lives lost. Tap one for the full record:
-        date and time, conditions, every vehicle, every person.</div></li>
-      <li><span class="k k-state"></span><div>Once you're inside a state, the map loads and shows that
-        state's crashes — one state at a time, so it stays fast. Zoom back out to see the country again.</div></li>
+      <li><span class="k k-dot"></span><div>Zoom in and every crash appears as its own dot, sized by
+        lives lost. Nothing is grouped, averaged, or smoothed — each dot is one crash. Tap one for the
+        full record: date and time, conditions, every vehicle, every person.</div></li>
+      <li><span class="k k-state"></span><div>Dots cover whatever is on screen, across state lines —
+        the map only pulls the small square of the country you are actually looking at, so it stays
+        fast on a phone. Zoomed out past that, the counter still totals the area in view.</div></li>
       <li><span class="k k-years"></span><div>The bars are deaths per year. Drag the two handles to narrow
         the map to a span of years.</div></li>
     </ul>
@@ -176,6 +175,6 @@
 </div>
 
 <script src="assets/vendor/maplibre-gl.js"></script>
-<script src="assets/js/app.js?v=5"></script>
+<script src="assets/js/app.js?v=6"></script>
 </body>
 </html>

@@ -452,7 +452,7 @@ def build_year(year, zf, harvest, points, shards_dir, states, state_idx, stfips,
     return kept, len(shards), total_bytes
 
 
-GRID_RES = 0.1
+GRID_RES = 0.5
 
 
 def write_json(path, obj):
