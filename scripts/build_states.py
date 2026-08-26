@@ -1,12 +1,22 @@
 #!/usr/bin/env python3
+"""
+Convert the us-atlas states TopoJSON into a small GeoJSON outline used as a
+fallback layer when basemap tiles are unavailable.
+
+Usage:
+    python3 scripts/build_states.py [path/to/states-10m.json] [--out data/us-states.json]
+
+The input defaults to downloading https://cdn.jsdelivr.net/npm/us-atlas@3.0.1/states-10m.json.
+Arcs are simplified with Douglas-Peucker *before* rings are stitched, so
+shared state borders stay identical on both sides.
+"""
 import json
 import math
-import os
 import sys
 import urllib.request
 
 URL = "https://cdn.jsdelivr.net/npm/us-atlas@3.0.1/states-10m.json"
-TOLERANCE = 0.03
+TOLERANCE = 0.03  # degrees
 
 
 def decode_arcs(topo):
@@ -54,7 +64,7 @@ def ring_coords(arc_indices, arcs):
     for idx in arc_indices:
         seg = arcs[idx] if idx >= 0 else list(reversed(arcs[~idx]))
         if pts:
-            seg = seg[1:]
+            seg = seg[1:]  # drop duplicated join point
         pts.extend(seg)
     return [[round(x, 3), round(y, 3)] for x, y in pts]
 
@@ -96,6 +106,7 @@ def main():
     fc = {"type": "FeatureCollection", "features": feats}
     with open(out, "w", encoding="utf-8") as f:
         json.dump(fc, f, separators=(",", ":"))
+    import os
     print(f"wrote {out} ({os.path.getsize(out)/1e3:.0f} KB, {len(feats)} states)")
 
 
