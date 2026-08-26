@@ -81,8 +81,6 @@ def clean_road_name(name):
     m = ZERO_PAD.match(name)
     if m:
         name = f"{m.group(1)}-{int(m.group(2))}"
-    # bare numeric codes ("9999999999", "88888") are unknown-road sentinels;
-    # real signed routes are 1-3 digits
     if name.isdigit() and len(name) >= 4:
         return ""
     return name
@@ -112,8 +110,6 @@ def fetch_zip(year, cache):
 
 
 def norm_key(k):
-    # some years ship a UTF-8 BOM, which latin-1 decodes onto the first
-    # header ("ï»¿STATE") — strip it or STATE reads as -1
     k = k.lstrip("﻿")
     if k.startswith("ï»¿"):
         k = k[3:]
@@ -188,8 +184,6 @@ def build_year(year, zf, harvest, points, shards_dir, states, state_idx, stfips,
                roads, road_idx, year_i, per_year, dropped):
     vehicles = {}
     persons = {}
-    # WEATHER and MAN_COLL were renumbered in 2010; harvested labels only
-    # apply to the modern codes, so older years leave those fields blank.
     modern_codes = year >= 2010
 
     VEH_NAMES = ("MAK_MODNAME", "MAKENAME", "BODY_TYPNAME", "ROLLOVERNAME", "SPEEDRELNAME")
@@ -207,7 +201,6 @@ def build_year(year, zf, harvest, points, shards_dir, states, state_idx, stfips,
             if not (0 <= travsp <= 200 or travsp == 997):
                 travsp = -1
         else:
-            # pre-2010 TRAV_SP is two-digit: 97-99 are code values, not speeds
             if not (0 <= travsp <= 96):
                 travsp = -1
         spdlim = to_int(row.get("VSPD_LIM"))
@@ -384,7 +377,6 @@ def build_year(year, zf, harvest, points, shards_dir, states, state_idx, stfips,
             if modern_codes:
                 roll = resolve(shard, harvest, "ROLLOVER", vrow, "ROLLOVER", v["rollover"], vnamed)
             else:
-                # pre-2010 rollover codes only say it happened, not how
                 roll = shard.intern("Rollover") if v["rollover"] > 0 else -1
             if v["rollover"] <= 0:
                 roll = -1

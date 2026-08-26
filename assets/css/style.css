@@ -235,7 +235,7 @@ body::before {
   to { transform: none; opacity: 1; }
 }
 
-/* ── route check ─────────────────────────────────────────────────── */
+
 
 .routebar {
   position: fixed;
@@ -709,7 +709,7 @@ body::before {
   .stats-sub { max-width: 52vw; }
   .stats-kicker { max-width: 52vw; }
 
-  /* the crash card becomes a bottom sheet on phones */
+
   .panel {
     top: auto; left: 0; right: 0; bottom: 0;
     width: auto;
@@ -720,7 +720,7 @@ body::before {
     z-index: 22;
     border-radius: 16px 16px 0 0;
     border-left: 0; border-right: 0; border-bottom: 0;
-    background: rgba(13, 12, 15, .97); /* readable even where blur is unsupported */
+    background: rgba(13, 12, 15, .97);
     box-shadow: 0 -14px 44px rgba(0, 0, 0, .7);
     animation: sheetup .26s ease-out;
   }

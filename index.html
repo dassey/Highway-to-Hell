@@ -12,7 +12,7 @@
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="assets/fonts/fonts.css">
 <link rel="stylesheet" href="assets/vendor/maplibre-gl.css">
-<link rel="stylesheet" href="assets/css/style.css">
+<link rel="stylesheet" href="assets/css/style.css?v=5">
 </head>
 <body>
 
@@ -50,6 +50,7 @@
     <button class="icon-btn locate-btn" id="route-btn" aria-label="Check a route" title="Check a route: deaths along a drive">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 21a3.5 3.5 0 1 1 3.35-4.5H14a2.5 2.5 0 0 0 0-5H9.5a4.5 4.5 0 0 1 0-9h4.15a3.5 3.5 0 1 1 0 2H9.5a2.5 2.5 0 0 0 0 5H14a4.5 4.5 0 0 1 0 9H9.85A3.5 3.5 0 0 1 6.5 21zm0-5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM17.5 3a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"/></svg>
     </button>
+    <button class="icon-btn" id="lens-btn" aria-label="Investigate around the cursor" title="Lens: only crashes within reach of the cursor">◎</button>
     <button class="icon-btn" id="base-btn" aria-label="Switch basemap" title="Switch between dark and street basemap">◐</button>
     <button class="icon-btn" id="about-btn" aria-label="About this map" title="About this map">?</button>
   </div>
@@ -147,7 +148,9 @@
     <h3>Your corner of the map</h3>
     <p>Search a town or address (or hit the crosshair for your location) to drop a pin
       and draw a 1–10&nbsp;mile ring — the numbers then count only what happened inside it.
-      Drag the pin to move it. The ◐ button swaps the dark map for a street map when you
+      Drag the pin to move it. On a computer, the ◎ lens does the same thing without the pin:
+      the ring rides along with your cursor, showing only the crashes within reach of it.
+      The ◐ button swaps the dark map for a street map when you
       need names and buildings. Place lookups go to the open
       <a href="https://photon.komoot.io" target="_blank" rel="noopener">Photon</a> geocoder;
       your device location is only used to move the map and never leaves your browser.</p>
@@ -173,6 +176,6 @@
 </div>
 
 <script src="assets/vendor/maplibre-gl.js"></script>
-<script src="assets/js/app.js"></script>
+<script src="assets/js/app.js?v=5"></script>
 </body>
 </html>
