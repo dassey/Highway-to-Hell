@@ -1,56 +1,121 @@
 'use strict';
 
 const QS = new URLSearchParams(location.search);
-const BOOT_URL = 'data/boot.json?v=6';
-const ROADS_URL = 'data/roads.json?v=6';
+
+const DEFAULTS = {
+  basemap: { start: 'dark', rememberChoice: true,
+    darkStyle: 'assets/vendor/dark-matter-style.json',
+    lightStyle: 'assets/vendor/liberty-style.json' },
+  camera: { startCenter: [-96.8, 38.5], startZoom: 3.4, minZoom: 2, maxZoom: 17,
+    homeBounds: [[-125.6, 23.6], [-66.0, 49.8]], fadeDuration: 120, tapToDiveZoom: 8.4 },
+  dots: { appearAtZoom: 8, tileDetailZoom: 9,
+    colorByDeaths: { 1: '#b3220f', 2: '#e0401a', 4: '#ff702a', 8: '#ffa542' },
+    sizeByZoom: { 8: { base: 1.1, perDeath: 0.5 }, 11: { base: 3.2, perDeath: 1.5 },
+      15: { base: 5, perDeath: 2 } },
+    fadeInFrom: 8, fadeInTo: 8.6, minOpacity: 0.35, maxOpacity: 0.92,
+    outlineWidthByZoom: { 8.6: 0.4, 11: 1.4 },
+    outlineColor: { dark: 'rgba(8,8,10,0.8)', light: 'rgba(255,255,255,0.9)' },
+    outsideRingColor: '#7c2013', outsideRingOpacity: 0.22 },
+  selection: { ringColor: '#ffc46b', ringWidth: 2.2,
+    ringSizeByZoom: { 7: 9, 12: 13, 16: 18 } },
+  stateLines: { color: { dark: 'rgba(233,228,221,0.16)', light: 'rgba(40,40,55,0.3)' },
+    widthByZoom: { 3: 0.6, 7: 1.1 }, fadeOutFrom: 6, fadeOutTo: 8 },
+  pin: { radiiMiles: [1, 3, 5, 10], defaultMiles: 5,
+    fillColor: 'rgba(255,90,31,0.045)', lineColor: 'rgba(255,122,51,0.85)',
+    lineWidth: 1.6, lineDash: [2.4, 1.8] },
+  lens: { enabled: true, hideOnTouchDevices: true, radiiMiles: [5, 10, 25, 50],
+    defaultMiles: 25, followDelayMs: 90 },
+  route: { corridorHalfWidthMiles: 0.25, casingColor: 'rgba(8,8,10,0.85)', casingWidth: 7,
+    lineWidth: 3.5, baseColor: '#5a626e',
+    tollColors: { none: '#4a5058', low: '#7a1c10', medium: '#c22815',
+      high: '#ff5a1f', worst: '#ffb46b' }, hotspotCount: 5 },
+  services: { geocoder: 'https://photon.komoot.io',
+    router: 'https://router.project-osrm.org' },
+  performance: { statePacksCached: { desktop: 6, phone: 3 }, caseFilesCached: 12,
+    statsRefreshDelayMs: 120, yearSliderDelayMs: 250 },
+  interface: { toastSeconds: 3.6, loaderTimeoutSeconds: 9, searchDelayMs: 160 },
+};
+
+const SET = (() => {
+  const user = window.H2H_SETTINGS;
+  const merge = (base, over) => {
+    if (!over || typeof over !== 'object' || Array.isArray(over)) {
+      return over === undefined ? base : over;
+    }
+    const out = Array.isArray(base) ? base.slice() : Object.assign({}, base);
+    for (const k of Object.keys(over)) out[k] = merge(base ? base[k] : undefined, over[k]);
+    return out;
+  };
+  try { return merge(DEFAULTS, user); } catch (e) { return DEFAULTS; }
+})();
+
+const rampPairs = (obj) => Object.keys(obj)
+  .map(Number).sort((a, b) => a - b)
+  .reduce((acc, k) => acc.concat([k, obj[k]]), []);
+
+const DATA_V = '?v=6';
+const BOOT_URL = 'data/boot.json' + DATA_V;
+const ROADS_URL = 'data/roads.json' + DATA_V;
 const STATES_URL = 'data/us-states.json?v=1';
-const packUrl = (fips) => 'data/s/' + fips + '.json?v=6';
-const TILE_URL = new URL('data/t/', location.href).href + '{z}/{x}/{y}.pbf?v=6';
-const TILE_MIN = 8;
-const TILE_MAX = 9;
+const packUrl = (fips) => 'data/s/' + fips + '.json' + DATA_V;
+const TILE_URL = new URL('data/t/', location.href).href + '{z}/{x}/{y}.pbf' + DATA_V;
+const TILE_MIN = SET.dots.appearAtZoom;
+const TILE_MAX = SET.dots.tileDetailZoom;
 const STYLE_URLS = {
-  dark: QS.get('style') || 'assets/vendor/dark-matter-style.json',
-  light: QS.get('styleLight') || 'assets/vendor/liberty-style.json',
+  dark: QS.get('style') || SET.basemap.darkStyle,
+  light: QS.get('styleLight') || SET.basemap.lightStyle,
 };
 const GLYPHS = new URL('assets/glyphs/', location.href).href + '{fontstack}/{range}.pbf';
-const GEO_BASE = QS.get('geo') || 'https://photon.komoot.io';
-const OSRM_BASE = QS.get('osrm') || 'https://router.project-osrm.org';
-const ROUTE_BUF_MI = 0.25;
+const GEO_BASE = QS.get('geo') || SET.services.geocoder;
+const OSRM_BASE = QS.get('osrm') || SET.services.router;
+const ROUTE_BUF_MI = SET.route.corridorHalfWidthMiles;
 const ROUTE_CELL = 0.08;
-const US_BOUNDS = [[-125.6, 23.6], [-66.0, 49.8]];
-const PACK_CACHE = matchMedia('(pointer: coarse)').matches ? 3 : 6;
+const US_BOUNDS = SET.camera.homeBounds;
+const IS_TOUCH = matchMedia('(pointer: coarse)').matches;
+const PACK_CACHE = IS_TOUCH
+  ? SET.performance.statePacksCached.phone
+  : SET.performance.statePacksCached.desktop;
 const BS = String.fromCharCode(92);
 const DC = 'deaths' + BS + 'crashes';
 const MI_PER_DEG = 69.172;
-const RADII = [1, 3, 5, 10];
-const DEFAULT_RADIUS = 5;
+const RADII = SET.pin.radiiMiles;
+const DEFAULT_RADIUS = SET.pin.defaultMiles;
 const LS_PIN = 'h2h.pin';
 const LS_BASE = 'h2h.base';
 const MONTHS = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const DOW = ['', 'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-const PTS_OPACITY = ['interpolate', ['linear'], ['zoom'], 8, 0.35, 8.6, 0.92];
-const PTS_STROKE_OPACITY = ['interpolate', ['linear'], ['zoom'], 8, 0, 9.2, 1];
-const PTS_RADIUS = ['interpolate', ['linear'], ['zoom'],
-  8, ['+', 1.1, ['*', 0.5, ['get', 'f']]],
-  11, ['+', 3.2, ['*', 1.5, ['get', 'f']]],
-  15, ['+', 5, ['*', 2, ['get', 'f']]]];
-const PTS_COLOR = ['interpolate', ['linear'], ['get', 'f'],
-  1, '#b3220f', 2, '#e0401a', 4, '#ff702a', 8, '#ffa542'];
+const PTS_OPACITY = ['interpolate', ['linear'], ['zoom'],
+  SET.dots.fadeInFrom, SET.dots.minOpacity, SET.dots.fadeInTo, SET.dots.maxOpacity];
+const PTS_STROKE_OPACITY = ['interpolate', ['linear'], ['zoom'],
+  SET.dots.fadeInFrom, 0, SET.dots.fadeInTo + 0.6, 1];
+const PTS_RADIUS = ['interpolate', ['linear'], ['zoom']].concat(
+  Object.keys(SET.dots.sizeByZoom).map(Number).sort((a, b) => a - b)
+    .reduce((acc, z) => acc.concat([z,
+      ['+', SET.dots.sizeByZoom[z].base,
+        ['*', SET.dots.sizeByZoom[z].perDeath, ['get', 'f']]]]), []));
+const PTS_COLOR = ['interpolate', ['linear'], ['get', 'f']]
+  .concat(rampPairs(SET.dots.colorByDeaths));
+const PTS_STROKE_W = ['interpolate', ['linear'], ['zoom']]
+  .concat(rampPairs(SET.dots.outlineWidthByZoom));
+const SEL_RADIUS = ['interpolate', ['linear'], ['zoom']]
+  .concat(rampPairs(SET.selection.ringSizeByZoom));
+const STATE_WIDTH = ['interpolate', ['linear'], ['zoom']]
+  .concat(rampPairs(SET.stateLines.widthByZoom));
 const FEAT_CHUNK = 12000;
-const LENS_RADII = [5, 10, 25, 50];
-const LENS_DEFAULT = 25;
+const LENS_RADII = SET.lens.radiiMiles;
+const LENS_DEFAULT = SET.lens.defaultMiles;
 const LENS_MIN_ZOOM = TILE_MIN;
 
 const THEMES = {
   dark: {
-    stateLine: 'rgba(233,228,221,0.16)',
-    ptStroke: 'rgba(8,8,10,0.8)',
+    stateLine: SET.stateLines.color.dark,
+    ptStroke: SET.dots.outlineColor.dark,
   },
   light: {
-    stateLine: 'rgba(40,40,55,0.3)',
-    ptStroke: 'rgba(255,255,255,0.9)',
+    stateLine: SET.stateLines.color.light,
+    ptStroke: SET.dots.outlineColor.light,
   },
 };
 
@@ -114,7 +179,13 @@ const S = window.__S = {
   selFeature: null,
 };
 
-try { S.base = localStorage.getItem(LS_BASE) === 'light' ? 'light' : 'dark'; } catch (e) { }
+S.base = SET.basemap.start === 'light' ? 'light' : 'dark';
+if (SET.basemap.rememberChoice) {
+  try {
+    const saved = localStorage.getItem(LS_BASE);
+    if (saved === 'light' || saved === 'dark') S.base = saved;
+  } catch (e) { }
+}
 
 Promise.all([
   fetch(BOOT_URL).then((r) => {
@@ -437,13 +508,13 @@ function initMap(baseStyle) {
   const map = new maplibregl.Map({
     container: 'map',
     style,
-    center: [-96.8, 38.5],
-    zoom: 3.4,
-    minZoom: 2,
-    maxZoom: 17,
+    center: SET.camera.startCenter,
+    zoom: SET.camera.startZoom,
+    minZoom: SET.camera.minZoom,
+    maxZoom: SET.camera.maxZoom,
     hash: true,
     attributionControl: false,
-    fadeDuration: 120,
+    fadeDuration: SET.camera.fadeDuration,
   });
   S.map = map;
 
@@ -470,7 +541,7 @@ function initMap(baseStyle) {
       refreshViewport();
     }
     map.once('idle', dismissLoader);
-    setTimeout(dismissLoader, 9000);
+    setTimeout(dismissLoader, SET.interface.loaderTimeoutSeconds * 1000);
   });
 
   map.on('moveend', () => {
@@ -506,8 +577,9 @@ function addLayers() {
       source: 'states',
       paint: {
         'line-color': T.stateLine,
-        'line-width': ['interpolate', ['linear'], ['zoom'], 3, 0.6, 7, 1.1],
-        'line-opacity': ['interpolate', ['linear'], ['zoom'], 6, 1, 8, 0],
+        'line-width': STATE_WIDTH,
+        'line-opacity': ['interpolate', ['linear'], ['zoom'],
+          SET.stateLines.fadeOutFrom, 1, SET.stateLines.fadeOutTo, 0],
       },
     }, under);
   }
@@ -546,16 +618,16 @@ function addLayers() {
     id: 'ring-fill',
     type: 'fill',
     source: 'pin-ring',
-    paint: { 'fill-color': 'rgba(255,90,31,0.045)' },
+    paint: { 'fill-color': SET.pin.fillColor },
   }, under);
   map.addLayer({
     id: 'ring-line',
     type: 'line',
     source: 'pin-ring',
     paint: {
-      'line-color': 'rgba(255,122,51,0.85)',
-      'line-width': 1.6,
-      'line-dasharray': [2.4, 1.8],
+      'line-color': SET.pin.lineColor,
+      'line-width': SET.pin.lineWidth,
+      'line-dasharray': SET.pin.lineDash,
     },
   });
 
@@ -564,14 +636,14 @@ function addLayers() {
     type: 'line',
     source: 'route',
     layout: { 'line-cap': 'round', 'line-join': 'round' },
-    paint: { 'line-color': 'rgba(8,8,10,0.85)', 'line-width': 7 },
+    paint: { 'line-color': SET.route.casingColor, 'line-width': SET.route.casingWidth },
   }, under);
   map.addLayer({
     id: 'route-line',
     type: 'line',
     source: 'route',
     layout: { 'line-cap': 'round', 'line-join': 'round' },
-    paint: { 'line-color': '#5a626e', 'line-width': 3.5 },
+    paint: { 'line-color': SET.route.baseColor, 'line-width': SET.route.lineWidth },
   }, under);
   if (S.route) {
     map.getSource('route').setData(S.route.lineFC);
@@ -586,9 +658,9 @@ function addLayers() {
     filter: ['boolean', false],
     minzoom: TILE_MIN,
     paint: {
-      'circle-color': '#7c2013',
+      'circle-color': SET.dots.outsideRingColor,
       'circle-radius': PTS_RADIUS,
-      'circle-opacity': 0.22,
+      'circle-opacity': SET.dots.outsideRingOpacity,
     },
   }, under);
 
@@ -601,7 +673,7 @@ function addLayers() {
     paint: {
       'circle-color': PTS_COLOR,
       'circle-radius': PTS_RADIUS,
-      'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 8.6, 0.4, 11, 1.4],
+      'circle-stroke-width': PTS_STROKE_W,
       'circle-stroke-color': T.ptStroke,
       'circle-opacity': PTS_OPACITY,
       'circle-stroke-opacity': PTS_STROKE_OPACITY,
@@ -614,14 +686,10 @@ function addLayers() {
     source: 'dots',
     paint: {
       'circle-color': PTS_COLOR,
-      'circle-radius': ['interpolate', ['linear'], ['zoom'],
-        4, ['+', 1.2, ['*', 0.7, ['get', 'f']]],
-        8, ['+', 1.8, ['*', 1.1, ['get', 'f']]],
-        11, ['+', 3.2, ['*', 1.5, ['get', 'f']]],
-        15, ['+', 5, ['*', 2, ['get', 'f']]]],
-      'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 8, 0.4, 11, 1.4],
+      'circle-radius': PTS_RADIUS,
+      'circle-stroke-width': PTS_STROKE_W,
       'circle-stroke-color': T.ptStroke,
-      'circle-opacity': 0.92,
+      'circle-opacity': SET.dots.maxOpacity,
     },
   }, under);
 
@@ -631,9 +699,9 @@ function addLayers() {
     source: 'sel',
     paint: {
       'circle-color': 'rgba(0,0,0,0)',
-      'circle-radius': ['interpolate', ['linear'], ['zoom'], 7, 9, 12, 13, 16, 18],
-      'circle-stroke-width': 2.2,
-      'circle-stroke-color': '#ffc46b',
+      'circle-radius': SEL_RADIUS,
+      'circle-stroke-width': SET.selection.ringWidth,
+      'circle-stroke-color': SET.selection.ringColor,
     },
   });
 
@@ -652,7 +720,7 @@ function initInteractions() {
       return;
     }
     if (map.getZoom() < TILE_MIN && !S.roadSel && !S.pin && !S.lens && !S.route) {
-      map.easeTo({ center: e.lngLat, zoom: TILE_MIN + 0.4, duration: 900 });
+      map.easeTo({ center: e.lngLat, zoom: SET.camera.tapToDiveZoom, duration: 900 });
     }
   });
 
@@ -680,7 +748,7 @@ function scheduleRefresh() {
   refreshTimer = setTimeout(() => {
     refreshTimer = 0;
     refreshViewport();
-  }, 120);
+  }, SET.performance.statsRefreshDelayMs);
 }
 
 function countRendered(test) {
@@ -828,7 +896,7 @@ let lensLast = 0;
 
 function lensTick() {
   if (lensTimer) return;
-  const wait = Math.max(0, 90 - (performance.now() - lensLast));
+  const wait = Math.max(0, SET.lens.followDelayMs - (performance.now() - lensLast));
   lensTimer = setTimeout(() => {
     lensTimer = 0;
     lensLast = performance.now();
@@ -854,7 +922,7 @@ function lensApply() {
 function lensDisplay(on) {
   const map = S.map;
   if (!map.getLayer('pts')) return;
-  map.setPaintProperty('pts', 'circle-opacity', on ? 0.92 : PTS_OPACITY);
+  map.setPaintProperty('pts', 'circle-opacity', on ? SET.dots.maxOpacity : PTS_OPACITY);
   map.setPaintProperty('pts', 'circle-stroke-opacity', on ? 1 : PTS_STROKE_OPACITY);
 }
 
@@ -1054,7 +1122,7 @@ function toast(msg) {
   el.textContent = msg;
   el.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), 3600);
+  toastTimer = setTimeout(() => el.classList.remove('show'), SET.interface.toastSeconds * 1000);
 }
 
 function ensureRoadsIdx() {
@@ -1162,7 +1230,7 @@ function getShard(year, fips) {
     if (!r.ok) throw new Error('detail ' + r.status);
     return r.json();
   }).then((j) => {
-    if (S.shardCache.size >= 12) {
+    if (S.shardCache.size >= SET.performance.caseFilesCached) {
       S.shardCache.delete(S.shardCache.keys().next().value);
     }
     S.shardCache.set(key, j);
@@ -1355,7 +1423,9 @@ function setBase(base) {
   if (base === S.base) return;
   loadStyle(base).then((style) => {
     S.base = base;
-    try { localStorage.setItem(LS_BASE, base); } catch (e) { }
+    if (SET.basemap.rememberChoice) {
+      try { localStorage.setItem(LS_BASE, base); } catch (e) { }
+    }
     $('base-btn').classList.toggle('lit', base === 'light');
     S.layersReady = false;
     S.map.setStyle(style, { diff: false });
@@ -1568,13 +1638,14 @@ function applyRouteYears(first) {
   $('rt-sub').textContent = Math.round(totalMi) + ' mi · ' + DC + ' within ¼ mi';
 
   const maxD = Math.max(1, ...st.map((e) => e.d));
+  const TC = SET.route.tollColors;
   const color = (v) => {
-    if (v <= 0) return '#4a5058';
+    if (v <= 0) return TC.none;
     const x = v / maxD;
-    if (x < 0.25) return '#7a1c10';
-    if (x < 0.55) return '#c22815';
-    if (x < 0.8) return '#ff5a1f';
-    return '#ffb46b';
+    if (x < 0.25) return TC.low;
+    if (x < 0.55) return TC.medium;
+    if (x < 0.8) return TC.high;
+    return TC.worst;
   };
   const stops = [];
   for (let k = 0; k < nS; k++) {
@@ -1593,7 +1664,7 @@ function applyRouteYears(first) {
   const spots = st.map((e, k) => ({ k, d: e.d, c: e.c, roads: e.roads }))
     .filter((e) => e.d > 0)
     .sort((x, z) => z.d - x.d)
-    .slice(0, 5);
+    .slice(0, SET.route.hotspotCount);
   const rows = spots.map((e) => {
     const m0 = Math.round(e.k * stretchLen);
     const m1 = Math.round(Math.min(totalMi, (e.k + 1) * stretchLen));
@@ -1707,7 +1778,7 @@ function initYearSlider() {
         updateRoadBanner(true);
         refreshViewport();
       }
-    }, 250);
+    }, SET.performance.yearSliderDelayMs);
   };
 
   lo.addEventListener('input', paint);
@@ -1755,7 +1826,7 @@ function initUI() {
   $('panel-close').addEventListener('click', closePanel);
   $('base-btn').addEventListener('click', () => setBase(S.base === 'dark' ? 'light' : 'dark'));
   $('base-btn').classList.toggle('lit', S.base === 'light');
-  if (matchMedia('(pointer: coarse)').matches) {
+  if (!SET.lens.enabled || (SET.lens.hideOnTouchDevices && IS_TOUCH)) {
     $('lens-btn').hidden = true;
   } else {
     $('lens-btn').addEventListener('click', () => setLens(!S.lens));
@@ -1783,7 +1854,7 @@ function initUI() {
   input.addEventListener('input', () => {
     ensureRoadsIdx().catch(() => { });
     clearTimeout(debounce);
-    debounce = setTimeout(() => showSuggest(input.value), 160);
+    debounce = setTimeout(() => showSuggest(input.value), SET.interface.searchDelayMs);
   });
   input.addEventListener('focus', () => {
     ensureRoadsIdx().catch(() => { });
