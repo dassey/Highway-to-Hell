@@ -94,6 +94,7 @@ const ROUTE_BUF_MI = FILE_SET.route.corridorHalfWidthMiles;
 const ROUTE_CELL = 0.08;
 const US_BOUNDS = FILE_SET.camera.homeBounds;
 const IS_TOUCH = matchMedia('(pointer: coarse)').matches;
+const MCP_HOST = document.modelContext || navigator.modelContext || null;
 const PACK_CACHE = IS_TOUCH
   ? FILE_SET.performance.statePacksCached.phone
   : FILE_SET.performance.statePacksCached.desktop;
@@ -531,6 +532,7 @@ function initMap(baseStyle) {
     hash: true,
     attributionControl: false,
     fadeDuration: SET.camera.fadeDuration,
+    canvasContextAttributes: { preserveDrawingBuffer: !!MCP_HOST },
   });
   S.map = map;
 

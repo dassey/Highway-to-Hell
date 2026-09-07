@@ -51,6 +51,38 @@ with CPU-throttled mobile runs. The basemap style, glyphs, and fonts are self-ho
 only basemap tiles, place search ([Photon](https://photon.komoot.io)), and route
 requests (OSRM) leave the site at runtime.
 
+## For AI agents (WebMCP)
+
+The page registers its own actions as browser tools, so an assistant works the real
+map instead of reverse-engineering the DOM. Where the browser exposes WebMCP
+(`document.modelContext`, or `navigator.modelContext` on Chrome before 150),
+`assets/js/webmcp.js` registers thirteen tools:
+
+| tool | what it does |
+| --- | --- |
+| `get_map_view` | where the map is, the year range, the toll in view, any pin/road/route |
+| `set_map_view` | move to a place, or to coordinates and a zoom |
+| `set_year_range` | narrow to a span of the 2001–2024 record |
+| `find_place` | US place candidates for a string, without moving the map |
+| `set_pin` / `clear_selection` | drop the pin and its 1/3/5/10-mile ring, or reset to the country |
+| `search_roads` / `select_road` | find a road by name, then isolate its crashes coast to coast |
+| `check_route` | route A → B and count the deaths within a quarter mile of the drive |
+| `list_crashes_in_view` | the plotted crashes, deadliest first, with case ids |
+| `get_crash_record` | the full FARS case file for one crash, as structured data |
+| `capture_map_screenshot` | a PNG of the map as the user sees it, plus the same numbers |
+| `set_basemap` | dark for the data, street for names and buildings |
+
+Every tool returns a sentence for the transcript and `structuredContent` for the
+model, and reports its own preconditions — `list_crashes_in_view` tells you the zoom
+to reach, `set_pin` says which radius it snapped to. The tools drive the same
+functions the buttons do, so the numbers an agent reads are the numbers on screen.
+
+`capture_map_screenshot` needs a readable WebGL buffer, so the map is created with
+`canvasContextAttributes: { preserveDrawingBuffer: true }` **only** when the browser
+exposes WebMCP; everyone else pays nothing for it. It captures the map canvas — the
+side panels are HTML, so their contents come back in the text instead. Browsers
+without WebMCP never run any of this: `webmcp.js` returns immediately.
+
 ## Rebuilding the data
 
 ```bash
