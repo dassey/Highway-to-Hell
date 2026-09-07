@@ -122,6 +122,17 @@ const ptsColor = () => ['interpolate', ['linear'], ['get', 'f']]
   .concat(rampPairs(SET.dots.colorByDeaths));
 const ptsStrokeW = () => ['interpolate', ['linear'], ['zoom']]
   .concat(rampPairs(SET.dots.outlineWidthByZoom));
+const heatWeight = () => ['interpolate', ['linear'], ['get', 'w']]
+  .concat(rampPairs(SET.heat.weightByDeaths));
+const heatIntensity = () => ['interpolate', ['linear'], ['zoom']]
+  .concat(rampPairs(SET.heat.intensityByZoom));
+const heatRadius = () => ['interpolate', ['linear'], ['zoom']]
+  .concat(rampPairs(SET.heat.radiusByZoom));
+const heatOpacity = () => ['interpolate', ['linear'], ['zoom'],
+  SET.heat.fadeOutFrom, SET.heat.maxOpacity, SET.heat.fadeOutTo, 0];
+const heatColor = () => ['interpolate', ['linear'], ['heatmap-density']]
+  .concat(rampPairs(SET.heat.colorByDensityPct).map((v, i) => (i % 2 ? v : v / 100)));
+const heatMaxZoom = () => Math.ceil(SET.heat.fadeOutTo);
 const selRadius = () => ['interpolate', ['linear'], ['zoom']]
   .concat(rampPairs(SET.selection.ringSizeByZoom));
 const stateWidth = () => ['interpolate', ['linear'], ['zoom']]
@@ -170,6 +181,7 @@ const fmt = (n) => n.toLocaleString('en-US');
 const S = window.__S = {
   d: null,
   grid: null,
+  gridFC: null,
   gridW: null,
   gridN: null,
   packs: new Map(),
@@ -282,6 +294,16 @@ function computeGrid() {
     w[g.ci[i]] += g.cw[i];
     n[g.ci[i]] += g.cn[i];
   }
+  const feats = [];
+  for (let b = 0; b < g.nb; b++) {
+    if (!w[b]) continue;
+    feats.push({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [g.lonC[b], g.latC[b]] },
+      properties: { w: w[b] },
+    });
+  }
+  S.gridFC = { type: 'FeatureCollection', features: feats };
 }
 
 function yearOn(yi) { return yi >= S.yearLo && yi <= S.yearHi; }
@@ -471,6 +493,9 @@ function applyFilters() {
   if (map.getLayer('pts-out')) {
     map.setFilter('pts-out', mode ? ['boolean', false] : out);
   }
+  if (map.getLayer('heat')) {
+    map.setLayoutProperty('heat', 'visibility', mode ? 'none' : 'visible');
+  }
   if (map.getLayer('mpts')) {
     map.setFilter('mpts', mode && yf.length ? ['all', ...yf] : (mode ? null : ['boolean', false]));
     map.setLayoutProperty('mpts', 'visibility', mode ? 'visible' : 'none');
@@ -621,6 +646,8 @@ function addLayers() {
     data: { type: 'FeatureCollection', features: S.modeFeats },
   });
 
+  map.addSource('grid', { type: 'geojson', data: S.gridFC });
+
   map.addSource('pin-ring', {
     type: 'geojson',
     data: S.pinPoly
@@ -632,6 +659,20 @@ function addLayers() {
     type: 'geojson',
     data: { type: 'FeatureCollection', features: S.selFeature ? [S.selFeature] : [] },
   });
+
+  map.addLayer({
+    id: 'heat',
+    type: 'heatmap',
+    source: 'grid',
+    maxzoom: heatMaxZoom(),
+    paint: {
+      'heatmap-weight': heatWeight(),
+      'heatmap-intensity': heatIntensity(),
+      'heatmap-radius': heatRadius(),
+      'heatmap-opacity': heatOpacity(),
+      'heatmap-color': heatColor(),
+    },
+  }, under);
 
   map.addLayer({
     id: 'ring-fill',
@@ -1792,6 +1833,8 @@ function initYearSlider() {
       S.yearHi = b;
       computeGrid();
       if (S.layersReady) {
+        const src = S.map.getSource('grid');
+        if (src) src.setData(S.gridFC);
         applyFilters();
         if (S.route) applyRouteYears();
         updateRoadBanner(true);
@@ -2062,6 +2105,15 @@ const SCHEMA = [
     { path: 'dots.outlineColor.light', label: 'Dot outline on street map', type: 'color' },
     { path: 'dots.outsideRingColor', label: 'Dimmed dots outside a ring', type: 'color' },
   ] },
+  { group: 'Heat field', fields: [
+    { path: 'heat.maxOpacity', label: 'Heat opacity', type: 'num', min: 0.1, max: 1, step: 0.02 },
+    { path: 'heat.fadeOutFrom', label: 'Heat starts fading at zoom', type: 'num', min: 3, max: 9, step: 0.1 },
+    { path: 'heat.fadeOutTo', label: 'Heat gone by zoom', type: 'num', min: 4, max: 12, step: 0.1 },
+    { path: 'heat.colorByDensityPct.30', label: 'Thin', type: 'color' },
+    { path: 'heat.colorByDensityPct.55', label: 'Middling', type: 'color' },
+    { path: 'heat.colorByDensityPct.78', label: 'Heavy', type: 'color' },
+    { path: 'heat.colorByDensityPct.100', label: 'Worst', type: 'color' },
+  ] },
   { group: 'Rings and selection', fields: [
     { path: 'selection.ringColor', label: 'Selected crash ring', type: 'color' },
     { path: 'selection.ringWidth', label: 'Selected ring width', type: 'num', min: 0.5, max: 6, step: 0.1 },
@@ -2174,6 +2226,12 @@ function applyLiveSettings() {
   setP('mpts', 'circle-stroke-width', ptsStrokeW());
   setP('mpts', 'circle-stroke-color', T.ptStroke);
   setP('mpts', 'circle-opacity', SET.dots.maxOpacity);
+  if (map.getLayer('heat')) map.setLayerZoomRange('heat', 0, heatMaxZoom());
+  setP('heat', 'heatmap-weight', heatWeight());
+  setP('heat', 'heatmap-intensity', heatIntensity());
+  setP('heat', 'heatmap-radius', heatRadius());
+  setP('heat', 'heatmap-opacity', heatOpacity());
+  setP('heat', 'heatmap-color', heatColor());
   setP('sel-ring', 'circle-radius', selRadius());
   setP('sel-ring', 'circle-stroke-width', SET.selection.ringWidth);
   setP('sel-ring', 'circle-stroke-color', SET.selection.ringColor);

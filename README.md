@@ -13,7 +13,9 @@ date and time, conditions, every vehicle, every person.
 ## What it does
 
 - **The national burn** — a pre-binned heat field of all 24 years, filterable by
-  year range with the histogram slider (bars are deaths per year).
+  year range with the histogram slider (bars are deaths per year). Its cells are
+  half a degree — about 35 miles — so it fades out as you dive and is gone by zoom
+  8, exactly where the crash dots resolve. You never see both at once.
 - **One state at a time** — zooming into a state lazy-loads its crash pack, so the
   map stays fast; roads re-aggregate their `deaths\crashes` labels on every move.
 - **The full record** — tap a crash for the FARS case file: conditions, harmful
