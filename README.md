@@ -3,6 +3,8 @@
 Every fatal crash on American roads with a known location, 2001–2024.
 898,888 people killed in 821,145 crashes.
 
+![The national picture](docs/screenshot-national.png)
+
 ## What it does
 
 A single-page map. No backend, no build step, no API keys — GitHub Pages serves it.
