@@ -42,8 +42,8 @@ window.H2H_SETTINGS = {
 
   heat: {
     weightByDeaths: { 1: 0.006, 10: 0.05, 100: 0.5, 1000: 5 },
-    intensityByZoom: { 2: 0.22, 3: 0.36, 4: 0.7, 6: 1, 8: 1.4 },
-    radiusByZoom: { 2: 4, 3: 8, 4: 17, 6: 26, 8: 36, 9: 44 },
+    intensityByZoom: { 2: 0.16, 8: 0.16 },
+    radiusByZoom: { 2: 7, 3: 15, 4: 30, 5: 59, 6: 118, 7: 160, 8: 160 },
     maxOpacity: 0.95,
     fadeOutFrom: 6.5,
     fadeOutTo: 8,
