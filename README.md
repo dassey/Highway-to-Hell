@@ -1,127 +1,80 @@
 # Highway to Hell
 
-**Every fatal crash on American roads with a known location, 2001–2024. Every road wears its toll.**
-
-A single-page map of the **898,888 people killed in 821,145 crashes** recorded by NHTSA's
-[Fatality Analysis Reporting System (FARS)](https://www.nhtsa.gov/research-data/fatality-analysis-reporting-system-fars).
-Zoomed out it's a heat field; inside a state every named road shows **deaths\crashes**
-for the view, every dot is a crash, and tapping a dot opens the full case file —
-date and time, conditions, every vehicle, every person.
-
-![Street level — every road numbered](docs/screenshot-street.png)
+Every fatal crash on American roads with a known location, 2001–2024.
+898,888 people killed in 821,145 crashes.
 
 ## What it does
 
-- **The national burn** — a pre-binned heat field of all 24 years, filterable by
-  year range with the histogram slider (bars are deaths per year). Its cells are
-  half a degree — about 35 miles — so it fades out as you dive and is gone by zoom
-  8, exactly where the crash dots resolve. You never see both at once.
-- **One state at a time** — zooming into a state lazy-loads its crash pack, so the
-  map stays fast; roads re-aggregate their `deaths\crashes` labels on every move.
-- **The full record** — tap a crash for the FARS case file: conditions, harmful
-  event, each vehicle (year/make/model, speed, rollover, fire, hit-and-run), each
-  person (age, role, restraint, ejection, outcome). Older years show what the era's
-  coding supports.
-- **Your corner** — search a place or hit the crosshair: a draggable pin with a
-  1/3/5/10-mile ring scopes everything to it. Pin and radius live in the URL and
+A single-page map. No backend, no build step, no API keys — GitHub Pages serves it.
+
+- **Zoomed out** — a heat field of deaths, filterable by year range with the
+  histogram slider. Cells are half a degree (~35 miles), so it fades out by zoom 8.
+- **Zoomed in** — from zoom 8 every crash is a dot, and every named road shows
+  `deaths\crashes` for the current view. Tap a dot for the FARS case file: date,
+  time, conditions, harmful event, each vehicle (year/make/model, speed, rollover,
+  fire, hit-and-run), each person (age, role, restraint, ejection, outcome).
+- **A pin** — search a place or hit the crosshair for a draggable pin with a
+  1/3/5/10-mile ring that scopes every count to it. Lives in the URL and
   localStorage.
-- **Route check** — give it a drive (A → B): it pulls the route from the open
-  [OSRM](http://project-osrm.org) router, counts every death within a quarter mile
-  of the road, colors the route by how deadly each stretch has been, and lists the
-  stretches where you should be extra careful.
-
-  ![Route check](docs/screenshot-route.png)
-- **Roads nationally** — the search box also finds roads; picking one isolates its
-  crashes coast to coast (`I-40` → its whole 24-year toll).
-- **Two basemaps** — CARTO Dark Matter by default, an OpenFreeMap street style (◐)
+- **A road** — search a road name to isolate its crashes coast to coast
+  (`I-40` → its whole 24-year toll).
+- **A drive** — give it A → B and it counts every death within a quarter mile of
+  the route, colors the route by how deadly each stretch has been, and lists the
+  worst stretches.
+- **Two basemaps** — CARTO Dark Matter by default, an OpenFreeMap street style
   when you need names and buildings.
+- **AI agents** — where the browser exposes WebMCP (`document.modelContext`, or
+  `navigator.modelContext` before Chrome 150), the page registers 13 tools in
+  `assets/js/webmcp.js`: read the view, move the map, set the year range, search
+  places and roads, drop the pin, check a route, list plotted crashes, pull one
+  case file, screenshot the map, switch basemaps. Browsers without WebMCP run
+  none of it.
 
-## How it works
+## Where the data comes from
 
-Pure static site — no backend, no build step, no API keys. GitHub Pages serves it.
+NHTSA's [Fatality Analysis Reporting System](https://www.nhtsa.gov/research-data/fatality-analysis-reporting-system-fars)
+(FARS) National CSV files, `accident` + `vehicle` + `person`, 2001–2024. US
+Government work, public domain.
 
-| piece | file(s) | size |
+FARS counts deaths within 30 days of a public-road crash. Coordinates exist from
+2001 (81.6% coverage that year, ≥92% from 2002, ≈99.5% recently); 1999–2000 have
+none, which is why the map starts at 2001. 22,385 crashes (2.7%) have unusable
+coordinates and are excluded. Road names are whatever each state reported, so one
+highway can appear under several names, and a road crossing state lines counts
+each state's stretch separately.
+
+The scripts in `scripts/` turn those CSVs into static files:
+
+| file | contents | size |
 | --- | --- | --- |
-| National heat grid + meta | `data/boot.json` | ~5 MB (≈1.6 MB gzipped) |
-| Per-state crash packs | `data/s/<fips>.json` | 30 MB total, lazy-loaded |
-| Road search index | `data/roads.json` | ~5 MB, lazy-loaded |
-| Per-crash case files | `data/d/<year>_<fips>.json` | 173 MB total, loaded per tap |
+| `data/boot.json` | national heat grid + metadata | 792 KB (130 KB gzipped) |
+| `data/us-states.json` | state outlines | 76 KB |
+| `data/t/<z>/<x>/<y>.pbf` | crash dot tiles, zoom 8–9 | 65 MB, 3,256 tiles |
+| `data/s/<fips>.json` | per-state crash packs, lazy-loaded | 30 MB total |
+| `data/roads.json` | road search index, lazy-loaded | 4.7 MB (1.0 MB gzipped) |
+| `data/d/<year>_<fips>.json` | per-crash case files, loaded per tap | 173 MB total |
 
-The frontend (MapLibre GL, vendored) never builds large feature sets synchronously —
-state packs hydrate in time-sliced chunks, so the UI thread never freezes, verified
-with CPU-throttled mobile runs. The basemap style, glyphs, and fonts are self-hosted;
-only basemap tiles, place search ([Photon](https://photon.komoot.io)), and route
-requests (OSRM) leave the site at runtime.
+At runtime the only outside calls are basemap tiles (CARTO, OpenFreeMap), place
+search ([Photon](https://photon.komoot.io)), and routing
+([OSRM](http://project-osrm.org)). Fonts, glyphs, basemap styles and the renderer
+are self-hosted.
 
-## For AI agents (WebMCP)
-
-The page registers its own actions as browser tools, so an assistant works the real
-map instead of reverse-engineering the DOM. Where the browser exposes WebMCP
-(`document.modelContext`, or `navigator.modelContext` on Chrome before 150),
-`assets/js/webmcp.js` registers thirteen tools:
-
-| tool | what it does |
-| --- | --- |
-| `get_map_view` | where the map is, the year range, the toll in view, any pin/road/route |
-| `set_map_view` | move to a place, or to coordinates and a zoom |
-| `set_year_range` | narrow to a span of the 2001–2024 record |
-| `find_place` | US place candidates for a string, without moving the map |
-| `set_pin` / `clear_selection` | drop the pin and its 1/3/5/10-mile ring, or reset to the country |
-| `search_roads` / `select_road` | find a road by name, then isolate its crashes coast to coast |
-| `check_route` | route A → B and count the deaths within a quarter mile of the drive |
-| `list_crashes_in_view` | the plotted crashes, deadliest first, with case ids |
-| `get_crash_record` | the full FARS case file for one crash, as structured data |
-| `capture_map_screenshot` | a PNG of the map as the user sees it, plus the same numbers |
-| `set_basemap` | dark for the data, street for names and buildings |
-
-Every tool returns a sentence for the transcript and `structuredContent` for the
-model, and reports its own preconditions — `list_crashes_in_view` tells you the zoom
-to reach, `set_pin` says which radius it snapped to. The tools drive the same
-functions the buttons do, so the numbers an agent reads are the numbers on screen.
-
-`capture_map_screenshot` needs a readable WebGL buffer, so the map is created with
-`canvasContextAttributes: { preserveDrawingBuffer: true }` **only** when the browser
-exposes WebMCP; everyone else pays nothing for it. It captures the map canvas — the
-side panels are HTML, so their contents come back in the text instead. Browsers
-without WebMCP never run any of this: `webmcp.js` returns immediately.
-
-## Rebuilding the data
+## Rebuilding
 
 ```bash
-python3 scripts/build_data.py            # 2001–2024, downloads FARS zips as needed
+python3 scripts/build_data.py     # 2001–2024, downloads FARS zips as needed
+python3 scripts/build_tiles.py    # crash dot tiles
+python3 scripts/build_states.py   # state outlines
 ```
 
-`scripts/build_data.py` reads the FARS National CSV `accident`, `vehicle`, and
-`person` files per year (cached in `.cache/fars/`), harvests code→label mappings
-from the modern files to back-fill labels for older years, gates fields whose codes
-were renumbered (WEATHER and MAN_COLL in 2010, old two-digit speeds), cleans state
-roadway-inventory noise out of road names, and writes the boot grid, state packs,
-road index, and detail shards. `scripts/build_states.py` regenerates the state
-outlines.
+## Licenses
 
-Coordinates exist in FARS from 2001 (81.6% coverage that year, ≥92% from 2002,
-≈99.5% in recent years); 1999–2000 have none, which is why the map starts at 2001.
-22,385 crashes (2.7%) with unusable coordinates are excluded from the map.
-
-## Reading the numbers honestly
-
-- FARS counts deaths within 30 days of a public-road crash — the federal definition.
-- Road names are whatever each state reported; the same highway can appear under
-  several names, and a road crossing state lines counts each state's stretch.
-- More deaths on a road usually means more traffic, not necessarily more danger per
-  mile. The route check shows where people died along your drive, not a per-mile
-  risk ranking.
-
-## Credits & licenses
-
-- Crash data: NHTSA FARS — US Government work, public domain.
+- Crash data: NHTSA FARS — public domain.
 - Basemaps: © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors,
-  © [CARTO](https://carto.com/attributions) (Dark Matter),
-  © [OpenFreeMap](https://openfreemap.org) (Liberty).
-- Routing: [OSRM](http://project-osrm.org) demo server. Geocoding:
-  [Photon](https://photon.komoot.io) by komoot.
+  © [CARTO](https://carto.com/attributions), © [OpenFreeMap](https://openfreemap.org).
+- Routing: [OSRM](http://project-osrm.org). Geocoding: [Photon](https://photon.komoot.io).
 - Renderer: MapLibre GL JS, BSD-3-Clause (`assets/vendor/MAPLIBRE-LICENSE.txt`).
-- Fonts: Anton, Barlow, Barlow Condensed (SIL OFL, self-hosted); map glyphs
-  Montserrat, Open Sans, Noto Sans (SIL OFL / Apache-2.0).
+- Fonts: Anton, Barlow, Barlow Condensed (SIL OFL); glyphs Montserrat, Open Sans,
+  Noto Sans (SIL OFL / Apache-2.0).
 
-Not affiliated with NHTSA or USDOT. Every number here was somebody — drive like it.
+Not affiliated with NHTSA or USDOT.

@@ -1,7 +1,3 @@
-/* WebMCP tool surface — registers the map's own actions with the browser's
-   agent API (document.modelContext, navigator.modelContext on Chrome < 150)
-   so an assistant drives the real app instead of guessing at the DOM.
-   No-ops entirely on browsers without WebMCP. */
 (function () {
   const HOST = (typeof document !== 'undefined' && document.modelContext)
     || (typeof navigator !== 'undefined' && navigator.modelContext)

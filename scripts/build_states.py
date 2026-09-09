@@ -1,15 +1,4 @@
 #!/usr/bin/env python3
-"""
-Convert the us-atlas states TopoJSON into a small GeoJSON outline used as a
-fallback layer when basemap tiles are unavailable.
-
-Usage:
-    python3 scripts/build_states.py [path/to/states-10m.json] [--out data/us-states.json]
-
-The input defaults to downloading https://cdn.jsdelivr.net/npm/us-atlas@3.0.1/states-10m.json.
-Arcs are simplified with Douglas-Peucker *before* rings are stitched, so
-shared state borders stay identical on both sides.
-"""
 import json
 import math
 import sys
