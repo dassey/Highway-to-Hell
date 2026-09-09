@@ -147,6 +147,29 @@ const theme = () => ({
   ptStroke: S.base === 'light' ? SET.dots.outlineColor.light : SET.dots.outlineColor.dark,
 });
 
+const ROAD_CLS = {
+  I: 1, IH: 1,
+  US: 2, USH: 2, 'US HWY': 2, 'US HIGHWAY': 2, 'US RT': 2, 'US ROUTE': 2,
+  SR: 3, SH: 3, ST: 3, SRT: 3, STATE: 3, 'STATE HWY': 3, 'STATE HIGHWAY': 3,
+  'STATE RT': 3, 'STATE ROUTE': 3,
+  CR: 4, CO: 4, CORD: 4, 'CO RD': 4, 'COUNTY RD': 4, 'COUNTY ROAD': 4,
+  FM: 5, RM: 5,
+  HWY: 0, HIGHWAY: 0, RT: 0, RTE: 0, ROUTE: 0,
+};
+const ROAD_RE = new RegExp('^(?:(' + Object.keys(ROAD_CLS)
+  .sort((a, b) => b.length - a.length).join('|').replace(/ /g, '\\s+')
+  + '))?[\\s-]*0*(\\d{1,4})$');
+
+function parseRoute(name) {
+  const t = name.trim();
+  const last = t.charCodeAt(t.length - 1) - 48;
+  if (!(last >= 0 && last <= 9)) return null;
+  const m = ROAD_RE.exec(t);
+  if (!m) return null;
+  const key = (m[1] || '').replace(/\s+/g, ' ');
+  return { cls: key ? ROAD_CLS[key] : 0, num: Number(m[2]) };
+}
+
 const REST_SHORT = {
   'None Used/Not Applicable': 'No restraint',
   'None Used': 'No restraint',
@@ -1193,6 +1216,12 @@ function ensureRoadsIdx() {
     return r.json();
   }).then((j) => {
     j.U = j.roads.map((nm) => nm.toUpperCase());
+    j.PFX = new Uint8Array(j.U.length);
+    j.NUM = new Int32Array(j.U.length).fill(-1);
+    for (let i = 0; i < j.U.length; i++) {
+      const r = parseRoute(j.U[i]);
+      if (r) { j.PFX[i] = r.cls; j.NUM[i] = r.num; }
+    }
     S.roadsIdx = j;
     return j;
   }).catch((err) => {
@@ -1951,14 +1980,31 @@ function initUI() {
 let placeAbort = null;
 let searchSeq = 0;
 
-function roadHits(q) {
+function roadHits(q, limit) {
   const R = S.roadsIdx;
   if (!R) return [];
-  const hits = [];
+  const cap = limit || 6;
+  const rq = parseRoute(q);
+  const named = [];
+  const sameNum = [];
+  const subs = [];
   for (let i = 0; i < R.U.length; i++) {
-    if (R.U[i].includes(q)) {
+    if (rq && R.NUM[i] === rq.num) {
+      if (rq.cls === 0 || R.PFX[i] === rq.cls) named.push(i);
+      else sameNum.push(i);
+    } else if (R.U[i].includes(q)) {
+      subs.push(i);
+    }
+  }
+  const byDeaths = (a, b) => R.d[b] - R.d[a];
+  named.sort(byDeaths);
+  sameNum.sort(byDeaths);
+  subs.sort(byDeaths);
+  const hits = [];
+  for (const list of [named, sameNum, subs]) {
+    for (const i of list) {
       hits.push([i, R.d[i], R.c[i]]);
-      if (hits.length >= 6) break;
+      if (hits.length >= cap) return hits;
     }
   }
   return hits;

@@ -433,21 +433,17 @@
         const q = String(args.query).trim().toUpperCase();
         if (q.length < 2) throw new Error('Give me at least two characters.');
         const cap = Math.min(25, Math.max(1, args.limit || 10));
-        const roads = [];
-        for (let i = 0; i < R.U.length && roads.length < cap; i++) {
-          if (R.U[i].includes(q)) {
-            roads.push({ name: R.roads[i], deaths: R.d[i], crashes: R.c[i], states: R.st[i].length });
-          }
-        }
+        const roads = roadHits(q, cap).map(([i]) => ({
+          name: R.roads[i], deaths: R.d[i], crashes: R.c[i], states: R.st[i].length,
+        }));
         if (!roads.length) throw new Error('No road matching "' + args.query + '".');
-        roads.sort((a, b) => b.deaths - a.deaths);
         return ok(roads.map((r) => r.name + ' — ' + fmt(r.deaths) + ' deaths in '
           + fmt(r.crashes) + ' crashes across ' + r.states + ' state(s)').join('\n'), { roads });
       }),
     },
     {
       name: 'select_road',
-      description: 'Isolate one road nationally: the map shows only its crashes, coast to coast, and reports its toll for the active year range. Pass a name from search_roads.',
+      description: 'Isolate one road nationally: the map shows only its crashes, coast to coast, and reports its toll for the active year range. Takes a name from search_roads, or a colloquial one like "hwy 6", which resolves to the deadliest road carrying that number.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -458,8 +454,8 @@
       },
       execute: (args) => ready().then(ensureRoadsIdx).then((R) => {
         const q = String(args.name).trim().toUpperCase();
-        let i = R.U.indexOf(q);
-        if (i < 0) i = R.U.findIndex((n) => n.includes(q));
+        const hit = roadHits(q, 1)[0];
+        const i = hit ? hit[0] : -1;
         if (i < 0) throw new Error('No road matching "' + args.name + '". Try search_roads first.');
         selectRoad(i);
         return waitFor(() => S.dotsKey === 'road', 20000, 'That road did not finish loading.')
