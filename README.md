@@ -45,14 +45,14 @@ each state's stretch separately.
 
 The scripts in `scripts/` turn those CSVs into static files:
 
-| file | contents | size |
-| --- | --- | --- |
-| `data/boot.json` | national heat grid + metadata | 792 KB (130 KB gzipped) |
-| `data/us-states.json` | state outlines | 76 KB |
-| `data/t/<z>/<x>/<y>.pbf` | crash dot tiles, zoom 8–9 | 65 MB, 3,256 tiles |
-| `data/s/<fips>.json` | per-state crash packs, lazy-loaded | 30 MB total |
-| `data/roads.json` | road search index, lazy-loaded | 4.7 MB (1.0 MB gzipped) |
-| `data/d/<year>_<fips>.json` | per-crash case files, loaded per tap | 173 MB total |
+| file | contents |
+| --- | --- |
+| `data/boot.json` | national heat grid + metadata, loaded on boot |
+| `data/us-states.json` | state outlines |
+| `data/t/<z>/<x>/<y>.pbf` | crash dot tiles, zoom 8–9 |
+| `data/s/<fips>.json` | per-state crash packs, lazy-loaded |
+| `data/roads.json` | road search index, lazy-loaded |
+| `data/d/<year>_<fips>.json` | per-crash case files, loaded per tap |
 
 At runtime the only outside calls are basemap tiles (CARTO, OpenFreeMap), place
 search ([Photon](https://photon.komoot.io)), and routing
