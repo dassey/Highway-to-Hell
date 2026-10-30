@@ -74,11 +74,14 @@ const rampPairs = (obj) => Object.keys(obj)
   .map(Number).sort((a, b) => a - b)
   .reduce((acc, k) => acc.concat([k, obj[k]]), []);
 
-const DATA_V = '?v=6';
+const DATA_V = '?v=7';
 const BOOT_URL = 'data/boot.json' + DATA_V;
 const ROADS_URL = 'data/roads.json' + DATA_V;
 const STATES_URL = 'data/us-states.json?v=1';
 const packUrl = (fips) => 'data/s/' + fips + '.json' + DATA_V;
+const factorUrl = (fips) => 'data/f/' + fips + '.json' + DATA_V;
+const whyGridUrl = (l) => 'data/g/' + l + '.json' + DATA_V;
+const WHY_URL = 'data/why.json' + DATA_V;
 const TILE_URL = new URL('data/t/', location.href).href + '{z}/{x}/{y}.pbf' + DATA_V;
 const TILE_MIN = FILE_SET.dots.tileDetailZoom - 1;
 const TILE_MAX = FILE_SET.dots.tileDetailZoom;
@@ -109,6 +112,31 @@ const MONTHS = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const DOW = ['', 'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
+const FACTORS = [
+  { l: 'P', key: 'ped', g: 0, label: 'Pedestrians', only: 'a pedestrian was killed' },
+  { l: 'B', key: 'bike', g: 0, label: 'Cyclists', only: 'a cyclist was killed' },
+  { l: 'M', key: 'moto', g: 0, label: 'Motorcyclists', only: 'a motorcyclist was killed' },
+  { l: 'K', key: 'child', g: 0, label: 'Children under 15', only: 'a child under 15 was killed' },
+  { l: 'D', key: 'drink', g: 1, label: 'Drinking driver', only: 'a driver had been drinking' },
+  { l: 'S', key: 'speed', g: 1, label: 'Speeding', only: 'speeding was involved' },
+  { l: 'U', key: 'nobelt', g: 1, label: 'No seat belt', only: 'someone killed wore no seat belt' },
+  { l: 'H', key: 'hitrun', g: 1, label: 'Hit-and-run', only: 'a driver fled the scene' },
+  { l: 'T', key: 'truck', g: 1, label: 'Large truck', only: 'a large truck was involved' },
+  { l: 'Y', key: 'teen', g: 1, label: 'Driver aged 15–20', only: 'a driver was 15 to 20' },
+  { l: 'O', key: 'older', g: 1, label: 'Driver 65 or older', only: 'a driver was 65 or older' },
+  { l: 'N', key: 'dark', g: 2, label: 'After dark', only: 'it happened after dark' },
+  { l: 'R', key: 'rural', g: 2, label: 'Rural road', only: 'the road was rural' },
+  { l: 'F', key: 'offroad', g: 2, label: 'Ran off the road', only: 'a lone vehicle ran off the road' },
+  { l: 'X', key: 'headon', g: 2, label: 'Head-on', only: 'it was a head-on collision' },
+  { l: 'I', key: 'junction', g: 2, label: 'At an intersection', only: 'it happened at an intersection' },
+];
+const FACTOR_BY = new Map(FACTORS.map((x) => [x.l, x]));
+const WHY_GROUPS = ['Who was killed', 'What was involved', 'Where and how'];
+const WHY_MIN_DEATHS = 25;
+const LS_WHY = 'h2h.why';
+const DAY_ROWS = [2, 3, 4, 5, 6, 7, 1];
+const DAY_SHORT = ['', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
 const ptsOpacity = () => ['interpolate', ['linear'], ['zoom'],
   SET.dots.fadeInFrom, SET.dots.minOpacity, SET.dots.fadeInTo, SET.dots.maxOpacity];
 const ptsStrokeOpacity = () => ['interpolate', ['linear'], ['zoom'],
@@ -125,7 +153,7 @@ const ptsStrokeW = () => ['interpolate', ['linear'], ['zoom']]
 const heatWeight = () => ['interpolate', ['linear'], ['get', 'w']]
   .concat(rampPairs(SET.heat.weightByDeaths));
 const heatIntensity = () => ['interpolate', ['linear'], ['zoom']]
-  .concat(rampPairs(SET.heat.intensityByZoom));
+  .concat(rampPairs(SET.heat.intensityByZoom).map((v, i) => (i % 2 ? v * S.heatGain : v)));
 const heatRadius = () => ['interpolate', ['linear'], ['zoom']]
   .concat(rampPairs(SET.heat.radiusByZoom));
 const heatOpacity = () => ['interpolate', ['linear'], ['zoom'],
@@ -229,6 +257,10 @@ const S = window.__S = {
   styleCache: {},
   shardCache: new Map(),
   selFeature: null,
+  why: null,
+  whyNat: null,
+  whyGrids: new Map(),
+  heatGain: 1,
 };
 
 S.base = SET.basemap.start === 'light' ? 'light' : 'dark';
@@ -239,6 +271,8 @@ if (SET.basemap.rememberChoice) {
   } catch (e) { }
 }
 
+const WHY0 = readWhyFromURL();
+
 Promise.all([
   fetch(BOOT_URL).then((r) => {
     if (!r.ok) throw new Error('data ' + r.status);
@@ -247,9 +281,13 @@ Promise.all([
   }),
   fetch(STATES_URL).then((r) => (r.ok ? r.json() : null)).catch(() => null),
   loadStyle(S.base).catch(() => null),
-]).then(([boot, statesGeo, baseStyle]) => {
+  getJSON(WHY_URL).catch(() => null),
+  WHY0 ? loadWhyGrid(WHY0).catch(() => null) : null,
+]).then(([boot, statesGeo, baseStyle, whyNat, whyGrid]) => {
   S.d = boot;
   S.statesGeo = statesGeo;
+  S.whyNat = whyNat;
+  if (whyNat && whyGrid) S.why = WHY0;
   buildStateShapes(statesGeo);
   S.yearHi = boot.meta.years.length - 1;
   setLoader(fmt(boot.meta.deaths) + ' deaths · ' + fmt(boot.meta.crashes) + ' crashes · rendering…');
@@ -267,6 +305,71 @@ function setLoader(msg) {
   const el = $('loader-status');
   if (el && !el.classList.contains('err')) el.textContent = msg;
 }
+
+function getJSON(url) {
+  return fetch(url).then((r) => {
+    if (!r.ok) throw new Error(url.split('?')[0] + ' ' + r.status);
+    return r.json();
+  });
+}
+
+function loadWhyGrid(l) {
+  const hit = S.whyGrids.get(l);
+  if (hit) return hit.p;
+  const e = { p: null, g: null };
+  e.p = getJSON(whyGridUrl(l)).then((j) => {
+    e.g = {
+      ci: Int32Array.from(j.ci), cy: Int32Array.from(j.cy),
+      cw: Int32Array.from(j.cw), cn: Int32Array.from(j.cn), when: j.when,
+    };
+    return e.g;
+  }).catch((err) => {
+    S.whyGrids.delete(l);
+    throw err;
+  });
+  S.whyGrids.set(l, e);
+  return e.p;
+}
+
+function whyGrid(l) {
+  const e = S.whyGrids.get(l);
+  return e ? e.g : null;
+}
+
+const maskMemo = new Map();
+function maskLetters(m) {
+  let out = maskMemo.get(m);
+  if (out === undefined) {
+    out = '';
+    for (let b = 0; b < FACTORS.length; b++) if (m & (1 << b)) out += FACTORS[b].l;
+    maskMemo.set(m, out);
+  }
+  return out;
+}
+
+function attachFactors(pack, fx) {
+  const n = pack.lat.length;
+  pack.k = new Array(n);
+  pack.t = new Int16Array(n).fill(-1);
+  if (!fx || !fx.k || fx.k.length !== n) {
+    pack.k.fill('');
+    return pack;
+  }
+  for (let i = 0; i < n; i++) {
+    pack.k[i] = maskLetters(fx.k[i]);
+    pack.t[i] = fx.t[i];
+  }
+  return pack;
+}
+
+function fetchPack(fips) {
+  return Promise.all([
+    getJSON(packUrl(fips)),
+    getJSON(factorUrl(fips)).catch(() => null),
+  ]).then(([pack, fx]) => attachFactors(pack, fx));
+}
+
+const whyOn = (k) => !S.why || (!!k && k.indexOf(S.why) >= 0);
 
 function loadStyle(base) {
   if (S.styleCache[base]) return Promise.resolve(S.styleCache[base]);
@@ -306,16 +409,27 @@ function buildGrid() {
 
 function computeGrid() {
   const g = S.grid;
+  const src = (S.why && whyGrid(S.why)) || g;
   const w = S.gridW;
   const n = S.gridN;
   w.fill(0);
   n.fill(0);
-  const nc = g.ci.length;
+  const nc = src.ci.length;
   for (let i = 0; i < nc; i++) {
-    const yi = g.cy[i];
+    const yi = src.cy[i];
     if (yi < S.yearLo || yi > S.yearHi) continue;
-    w[g.ci[i]] += g.cw[i];
-    n[g.ci[i]] += g.cn[i];
+    w[src.ci[i]] += src.cw[i];
+    n[src.ci[i]] += src.cn[i];
+  }
+  S.heatGain = 1;
+  if (S.why && S.whyNat && src !== g) {
+    const lo = Math.max(S.yearLo, sinceIndex(S.why));
+    let all = 0; let some = 0;
+    for (let yi = lo; yi <= S.yearHi; yi++) {
+      all += S.d.meta.perYear[String(S.d.meta.years[yi])].deaths;
+      some += S.whyNat.d[S.why][yi];
+    }
+    S.heatGain = some > 0 ? Math.min(12, Math.max(1, all / some)) : 1;
   }
   const feats = [];
   for (let b = 0; b < g.nb; b++) {
@@ -332,7 +446,7 @@ function computeGrid() {
 function yearOn(yi) { return yi >= S.yearLo && yi <= S.yearHi; }
 
 function packFeatures(pack) {
-  const { lat, lon, f, y, r, c, si, roads } = pack;
+  const { lat, lon, f, y, r, c, si, roads, k, t } = pack;
   const n = lat.length;
   const feats = new Array(n);
   let i = 0;
@@ -343,7 +457,7 @@ function packFeatures(pack) {
         feats[i] = {
           type: 'Feature',
           geometry: { type: 'Point', coordinates: [lon[i] / 1e5, lat[i] / 1e5] },
-          properties: { f: f[i], y: y[i], s: si, c: c[i], rn: roads[r[i]] },
+          properties: { f: f[i], y: y[i], s: si, c: c[i], rn: roads[r[i]], k: k[i], t: t[i] },
         };
       }
       if (i < n) setTimeout(slice, 0);
@@ -361,10 +475,7 @@ function ensurePack(fips) {
     return e.p;
   }
   e = { p: null, pack: null };
-  e.p = fetch(packUrl(fips)).then((r) => {
-    if (!r.ok) throw new Error('pack ' + r.status);
-    return r.json();
-  }).then((j) => packFeatures(j).then((feats) => {
+  e.p = fetchPack(fips).then((j) => packFeatures(j).then((feats) => {
     j.feats = feats;
     e.pack = j;
     return j;
@@ -401,14 +512,14 @@ function roadFeatsFrom(pack, name) {
   }
   const ri = pack.roads.indexOf(name);
   if (ri < 0) return [];
-  const { lat, lon, f, y, r, c, si } = pack;
+  const { lat, lon, f, y, r, c, si, k, t } = pack;
   const out = [];
   for (let i = 0; i < lat.length; i++) {
     if (r[i] !== ri) continue;
     out.push({
       type: 'Feature',
       geometry: { type: 'Point', coordinates: [lon[i] / 1e5, lat[i] / 1e5] },
-      properties: { f: f[i], y: y[i], s: si, c: c[i], rn: name },
+      properties: { f: f[i], y: y[i], s: si, c: c[i], rn: name, k: k[i], t: t[i] },
     });
   }
   return out;
@@ -417,10 +528,7 @@ function roadFeatsFrom(pack, name) {
 function fetchPackLean(fips) {
   const cached = loadedPack(fips);
   if (cached) return Promise.resolve(cached);
-  return fetch(packUrl(fips)).then((r) => {
-    if (!r.ok) throw new Error('pack ' + r.status);
-    return r.json();
-  });
+  return fetchPack(fips);
 }
 
 function prunePacks() {
@@ -485,8 +593,9 @@ function syncData() {
 }
 
 function yearClauses() {
-  if (S.yearLo === 0 && S.yearHi === S.d.meta.years.length - 1) return [];
-  return [['>=', ['get', 'y'], S.yearLo], ['<=', ['get', 'y'], S.yearHi]];
+  const out = S.why ? [['in', S.why, ['to-string', ['get', 'k']]]] : [];
+  if (S.yearLo === 0 && S.yearHi === S.d.meta.years.length - 1) return out;
+  return out.concat([['>=', ['get', 'y'], S.yearLo], ['<=', ['get', 'y'], S.yearHi]]);
 }
 
 function applyFilters() {
@@ -542,6 +651,23 @@ function ringPolygon(pin) {
   return { type: 'Polygon', coordinates: [coords] };
 }
 
+function makeInRingPoly(pin) {
+  const mpdLon = MI_PER_DEG * Math.cos(pin.lat * Math.PI / 180);
+  const step = (Math.PI * 2) / 72;
+  const apothem = pin.mi * Math.cos(step / 2);
+  return (lng, lat) => {
+    const dx = (lng - pin.lng) * mpdLon;
+    const dy = (lat - pin.lat) * MI_PER_DEG;
+    const r = Math.hypot(dx, dy);
+    if (r > pin.mi) return false;
+    if (r <= apothem) return true;
+    let a = Math.atan2(dy, dx);
+    if (a < 0) a += Math.PI * 2;
+    const phi = (a % step) - step / 2;
+    return r <= apothem / Math.cos(phi);
+  };
+}
+
 function ringBounds(pin) {
   const dLat = pin.mi / MI_PER_DEG;
   const dLon = pin.mi / (MI_PER_DEG * Math.cos(pin.lat * Math.PI / 180));
@@ -586,7 +712,7 @@ function initMap(baseStyle) {
 
   if (!hasHash) {
     if (pin0) {
-      map.fitBounds(ringBounds(pin0), { padding: 90, duration: 0 });
+      map.fitBounds(ringBounds(pin0), { padding: sidePad(90), duration: 0 });
     } else {
       fitUS(0);
     }
@@ -621,9 +747,22 @@ function initMap(baseStyle) {
   });
 }
 
+function sidePad(p) {
+  const pad = typeof p === 'number' ? { top: p, bottom: p, left: p, right: p } : Object.assign({}, p);
+  if (S.whyOpen && !isPhone()) {
+    pad.left = Math.max(pad.left, $('why').getBoundingClientRect().right + 16);
+  }
+  const spare = innerWidth - pad.left - pad.right - 240;
+  if (spare < 0) {
+    pad.right = Math.max(20, pad.right + spare);
+    pad.left = Math.max(20, innerWidth - pad.right - 240);
+  }
+  return pad;
+}
+
 function fitUS(duration) {
   S.map.fitBounds(US_BOUNDS, {
-    padding: { top: 110, bottom: 40, left: 30, right: 30 },
+    padding: sidePad({ top: 110, bottom: 40, left: 30, right: 30 }),
     duration: duration == null ? 900 : duration,
   });
 }
@@ -851,11 +990,11 @@ function countRendered(test) {
     const p = ft.properties;
     const k = p.s + ':' + p.y + ':' + p.c;
     if (seen.has(k)) continue;
-    seen.add(k);
     if (test) {
       const g = ft.geometry.coordinates;
       if (!test(g[0], g[1])) continue;
     }
+    seen.add(k);
     d += p.f;
     c += 1;
   }
@@ -875,6 +1014,22 @@ function gridCount(inView) {
 }
 
 function refreshViewport() {
+  refreshCounts();
+  scheduleWhy();
+}
+
+function viewTest() {
+  const b = S.map.getBounds();
+  const w = b.getWest(); const e = b.getEast();
+  const so = b.getSouth(); const n = b.getNorth();
+  const wrap = e < w;
+  return (lo, la) => {
+    if (la < so || la > n) return false;
+    return wrap ? !(lo < w && lo > e) : !(lo < w || lo > e);
+  };
+}
+
+function refreshCounts() {
   if (!S.layersReady) return;
   const map = S.map;
   const z = map.getZoom();
@@ -914,7 +1069,7 @@ function refreshViewport() {
     const pending = S.dotsKey !== 'route' || !S.route.hits;
     if (!pending) {
       for (const ft of S.modeFeats) {
-        if (!yearOn(ft.properties.y)) continue;
+        if (!yearOn(ft.properties.y) || !whyOn(ft.properties.k)) continue;
         d += ft.properties.f;
         c += 1;
       }
@@ -933,7 +1088,7 @@ function refreshViewport() {
     const pending = S.dotsKey !== 'road';
     if (!pending) {
       for (const ft of S.modeFeats) {
-        if (!yearOn(ft.properties.y)) continue;
+        if (!yearOn(ft.properties.y) || !whyOn(ft.properties.k)) continue;
         const g = ft.geometry.coordinates;
         if (!inView(g[1], g[0])) continue;
         d += ft.properties.f;
@@ -1086,7 +1241,7 @@ function applyPin(pin, { fly = true } = {}) {
   try { localStorage.setItem(LS_PIN, JSON.stringify(pin)); } catch (e) { }
 
   if (fly) {
-    S.map.fitBounds(ringBounds(pin), { padding: 90, maxZoom: 15, duration: 900 });
+    S.map.fitBounds(ringBounds(pin), { padding: sidePad(90), maxZoom: 15, duration: 900 });
   }
   if (S.roadSel) {
     updateRoadBanner(false);
@@ -1265,7 +1420,7 @@ function updateRoadBanner(refit) {
   const statesSeen = new Set();
   for (const ft of S.modeFeats) {
     const p = ft.properties;
-    if (!yearOn(p.y)) continue;
+    if (!yearOn(p.y) || !whyOn(p.k)) continue;
     const [x, yy] = ft.geometry.coordinates;
     if (inRing && !inRing(x, yy)) continue;
     d += p.f;
@@ -1283,14 +1438,15 @@ function updateRoadBanner(refit) {
     ? 'within ' + S.pin.mi + ' mi'
     : (statesSeen.size > 1
       ? 'in ' + statesSeen.size + ' states'
-      : (statesSeen.size ? S.d.states[[...statesSeen][0]] : 'no crashes in this year range'));
+      : (statesSeen.size ? S.d.states[[...statesSeen][0]]
+        : (S.why ? 'none where ' + FACTOR_BY.get(S.why).only : 'no crashes in this year range')));
 
   if (refit) {
     if (S.pin) {
-      S.map.fitBounds(ringBounds(S.pin), { padding: 90, maxZoom: 15, duration: 700 });
+      S.map.fitBounds(ringBounds(S.pin), { padding: sidePad(90), maxZoom: 15, duration: 700 });
     } else if (c > 0) {
       S.map.fitBounds([[minX, minY], [maxX, maxY]], {
-        padding: { top: 130, bottom: 90, left: 60, right: 60 },
+        padding: sidePad({ top: 130, bottom: 90, left: 60, right: 60 }),
         maxZoom: 12,
         duration: 900,
       });
@@ -1362,6 +1518,7 @@ function hourText(hr, min) {
 }
 
 function openDetail(props, lngLat) {
+  if (S.whyOpen && isPhone()) setWhyOpen(false);
   selectDot(props, lngLat);
   const year = S.d.meta.years[props.y];
   const fips = S.d.stfips[props.s];
@@ -1647,7 +1804,10 @@ function buildRoute(a, b, coords) {
   };
   token.lineFC = lineFC;
   S.map.getSource('route').setData(lineFC);
-  S.map.fitBounds([[minX, minY], [maxX, maxY]], { padding: 70, duration: 900 });
+  S.map.fitBounds([[minX, minY], [maxX, maxY]], {
+    padding: sidePad(isPhone() ? 70 : { top: 120, bottom: 70, left: 70, right: 390 }),
+    duration: 900,
+  });
 
   Promise.all(fipsList.map(ensurePack)).then((pks) => {
     if (S.route !== token) return;
@@ -1659,7 +1819,7 @@ function buildRoute(a, b, coords) {
 
 function scanCorridor(token, pks, cells) {
   const { coords, cum } = token;
-  const hits = { mi: [], d: [], y: [], rn: [], fi: [] };
+  const hits = { mi: [], d: [], y: [], rn: [], fi: [], k: [] };
   let pki = 0; let row = 0;
 
   function slice() {
@@ -1692,6 +1852,7 @@ function scanCorridor(token, pks, cells) {
         hits.y.push(y[row]);
         hits.rn.push(pk.roads[r[row]]);
         hits.fi.push(pk.feats[row]);
+        hits.k.push(pk.k[row]);
       }
       pki++;
       row = 0;
@@ -1706,6 +1867,7 @@ function applyRouteYears(first) {
   const token = S.route;
   if (!token || !token.hits) return;
   const { mi, d, y, rn, fi } = token.hits;
+  const hk = token.hits.k;
   const totalMi = token.totalMi;
   const stretchLen = Math.min(8, Math.max(1.5, totalMi / 36));
   const nS = Math.max(1, Math.ceil(totalMi / stretchLen));
@@ -1714,9 +1876,10 @@ function applyRouteYears(first) {
   const feats = [];
   for (let i = 0; i < mi.length; i++) {
     if (!yearOn(y[i])) continue;
+    feats.push(fi[i]);
+    if (!whyOn(hk[i])) continue;
     totD += d[i];
     totC += 1;
-    feats.push(fi[i]);
     const k = Math.min(nS - 1, Math.floor(mi[i] / stretchLen));
     st[k].d += d[i];
     st[k].c += 1;
@@ -1774,14 +1937,17 @@ function applyRouteYears(first) {
   });
   const panel = $('panel');
   panel.hidden = false;
+  const why = S.why ? FACTOR_BY.get(S.why) : null;
   $('panel-body').innerHTML = '<div class="p-kicker">ROUTE CHECK · '
     + esc(token.a.label.toUpperCase()) + ' → ' + esc(token.b.label.toUpperCase()) + '</div>'
     + '<h2 class="p-road">' + fmt(totD) + ' dead along this drive</h2>'
     + '<div class="p-sub">' + Math.round(totalMi) + ' miles · every death within a quarter mile of the road, '
-    + S.d.meta.years[S.yearLo] + '–' + S.d.meta.years[S.yearHi] + '.</div>'
+    + S.d.meta.years[S.yearLo] + '–' + S.d.meta.years[S.yearHi]
+    + (why ? ', only crashes where ' + esc(why.only) : '') + '.</div>'
     + (rows.length
       ? '<div class="p-h">BE EXTRA CAREFUL HERE</div>' + rows.join('')
-      : '<div class="p-sub">No recorded deaths along this route in the chosen years. Drive like it anyway.</div>');
+      : '<div class="p-sub">No recorded deaths along this route'
+        + (why ? ' where ' + esc(why.only) : '') + ' in the chosen years. Drive like it anyway.</div>');
   for (const btn of document.querySelectorAll('.hs-row')) {
     btn.addEventListener('click', () => {
       S.map.easeTo({ center: [Number(btn.dataset.lng), Number(btn.dataset.lat)], zoom: 11, duration: 800 });
@@ -1825,17 +1991,15 @@ function initYearSlider() {
   const years = meta.years;
   const n = years.length;
   const hist = $('yr-hist');
-  const deaths = years.map((yr) => meta.perYear[String(yr)].deaths);
-  const maxD = Math.max(...deaths);
   const bars = [];
-  years.forEach((yr, i) => {
+  years.forEach(() => {
     const bar = document.createElement('div');
     bar.className = 'yb on';
-    bar.style.height = Math.max(14, Math.round((deaths[i] / maxD) * 100)) + '%';
-    bar.title = yr + ' — ' + fmt(deaths[i]) + ' deaths';
     hist.appendChild(bar);
     bars.push(bar);
   });
+  S.histBars = bars;
+  paintHist();
 
   const lo = $('yr-lo');
   const hi = $('yr-hi');
@@ -1862,8 +2026,7 @@ function initYearSlider() {
       S.yearHi = b;
       computeGrid();
       if (S.layersReady) {
-        const src = S.map.getSource('grid');
-        if (src) src.setData(S.gridFC);
+        pushGrid();
         applyFilters();
         if (S.route) applyRouteYears();
         updateRoadBanner(true);
@@ -1879,6 +2042,24 @@ function initYearSlider() {
   paint();
 }
 
+function paintHist() {
+  const bars = S.histBars;
+  if (!bars) return;
+  const meta = S.d.meta;
+  const years = meta.years;
+  const x = S.why && S.whyNat ? FACTOR_BY.get(S.why) : null;
+  const vals = years.map((yr, i) => (x ? S.whyNat.d[x.l][i] : meta.perYear[String(yr)].deaths));
+  const maxD = Math.max(1, ...vals);
+  const lo = x ? sinceIndex(x.l) : 0;
+  bars.forEach((bar, i) => {
+    bar.style.height = (i < lo ? 8 : Math.max(14, Math.round((vals[i] / maxD) * 100))) + '%';
+    bar.classList.toggle('na', i < lo);
+    bar.title = years[i] + ' — ' + (i < lo
+      ? 'not recorded before ' + years[lo]
+      : fmt(vals[i]) + ' deaths' + (x ? ' where ' + x.only : ''));
+  });
+}
+
 function initUI() {
   const meta = S.d.meta;
   const y0 = meta.years[0];
@@ -1886,6 +2067,7 @@ function initUI() {
 
   $('tag-years').textContent = y0 + '–' + y1;
   initYearSlider();
+  initWhy();
 
   $('m-deaths').textContent = fmt(meta.deaths);
   $('m-crashes').textContent = fmt(meta.crashes);
@@ -1909,6 +2091,7 @@ function initUI() {
     if (e.key === 'Escape') {
       if (!$('set-modal').hidden) { $('set-modal').hidden = true; return; }
       if (!$('panel').hidden) { closePanel(); return; }
+      if (S.whyOpen && isPhone()) { setWhyOpen(false); return; }
       if (S.lens) { setLens(false); return; }
       $('modal').hidden = true;
       hideSuggest();
@@ -2128,6 +2311,429 @@ function dismissLoader() {
   if (l.classList.contains('gone')) return;
   l.classList.add('gone');
   setTimeout(() => { l.style.display = 'none'; }, 800);
+}
+
+function sinceIndex(l) {
+  const yr = S.whyNat && S.whyNat.since[l];
+  const i = yr ? S.d.meta.years.indexOf(yr) : 0;
+  return i < 0 ? 0 : i;
+}
+
+function readWhyFromURL() {
+  const key = QS.get('why');
+  const x = key && FACTORS.find((f) => f.key === key);
+  return x ? x.l : null;
+}
+
+function writeWhyToURL() {
+  const qs = new URLSearchParams(location.search);
+  if (S.why) qs.set('why', FACTOR_BY.get(S.why).key);
+  else qs.delete('why');
+  const q = qs.toString();
+  history.replaceState(null, '', location.pathname + (q ? '?' + q : '') + location.hash);
+}
+
+const isPhone = () => matchMedia('(max-width: 900px)').matches;
+
+function pushGrid() {
+  if (!S.map || !S.layersReady) return;
+  const src = S.map.getSource('grid');
+  if (src) src.setData(S.gridFC);
+  if (S.map.getLayer('heat')) S.map.setPaintProperty('heat', 'heatmap-intensity', heatIntensity());
+}
+
+function setWhy(l) {
+  const want = l && FACTOR_BY.has(l) && S.whyNat ? l : null;
+  S.whyWant = want;
+  if (want === S.why) {
+    renderWhyRows();
+    return Promise.resolve(true);
+  }
+  const row = want && document.querySelector('.wr[data-l="' + want + '"]');
+  if (row) row.classList.add('busy');
+  return (want ? loadWhyGrid(want) : Promise.resolve()).then(() => {
+    if (S.whyWant !== want) return false;
+    S.why = want;
+    writeWhyToURL();
+    computeGrid();
+    pushGrid();
+    applyFilters();
+    paintHist();
+    if (S.route) applyRouteYears();
+    if (S.roadSel) updateRoadBanner(false);
+    refreshViewport();
+    if (S.whyOpen) renderWhy();
+    return true;
+  }).catch(() => {
+    if (row) row.classList.remove('busy');
+    toast('Could not load that breakdown — check the connection.');
+    return false;
+  });
+}
+
+function newTally() {
+  const ny = S.d.meta.years.length;
+  const f = {};
+  for (const x of FACTORS) f[x.l] = new Float64Array(ny);
+  return { d: new Float64Array(ny), c: new Float64Array(ny), f, sel: new Float64Array(ny), when: new Float64Array(168) };
+}
+
+function tallyAdd(T, p) {
+  const y = p.y;
+  const n = p.f;
+  const k = p.k || '';
+  T.d[y] += n;
+  T.c[y] += 1;
+  for (let j = 0; j < k.length; j++) {
+    const a = T.f[k[j]];
+    if (a) a[y] += n;
+  }
+  if (!whyOn(k)) return;
+  T.sel[y] += n;
+  const t = p.t;
+  if (t != null && t >= 0 && y >= S.yearLo && y <= S.yearHi) T.when[t] += n;
+}
+
+function nationTally() {
+  const W = S.whyNat;
+  const T = newTally();
+  S.d.meta.years.forEach((yr, yi) => {
+    const py = S.d.meta.perYear[String(yr)];
+    T.d[yi] = py.deaths;
+    T.c[yi] = py.crashes;
+  });
+  for (const x of FACTORS) T.f[x.l].set(W.d[x.l]);
+  T.sel.set(S.why ? W.d[S.why] : T.d);
+  const fg = S.why ? whyGrid(S.why) : null;
+  const rows = S.why ? (fg && fg.when) : W.when;
+  if (rows) {
+    for (let yi = S.yearLo; yi <= S.yearHi; yi++) {
+      const r = rows[yi];
+      for (let t = 0; t < 168; t++) T.when[t] += r[t];
+    }
+  }
+  return T;
+}
+
+function whyScope() {
+  if (!S.d || !S.whyNat || !S.layersReady) return null;
+  if (S.route) {
+    const name = 'Along this route';
+    if (!S.route.hits) return { name, sub: 'tracing the corridor…', pending: true };
+    const T = newTally();
+    for (const ft of S.route.hits.fi) tallyAdd(T, ft.properties);
+    return { name, sub: S.route.a.label + ' → ' + S.route.b.label, T };
+  }
+  if (S.roadSel) {
+    if (S.dotsKey !== 'road') return { name: S.roadSel.name, sub: 'pulling this road…', pending: true };
+    const inRing = S.pin ? makeInRing(S.pin) : null;
+    const T = newTally();
+    for (const ft of S.modeFeats) {
+      if (inRing) {
+        const g = ft.geometry.coordinates;
+        if (!inRing(g[0], g[1])) continue;
+      }
+      tallyAdd(T, ft.properties);
+    }
+    return { name: S.roadSel.name, sub: S.pin ? 'within ' + S.pin.mi + ' mi of ' + S.pin.name : 'the whole road', T };
+  }
+  const ring = S.lens ? (S.lens.over && S.lens.lng != null ? S.lens : null) : S.pin;
+  if (S.map.getZoom() < TILE_MIN || (S.lens && !ring)) {
+    let sub = 'zoom in to break down just this area';
+    if (S.lens) sub = 'point the lens at the map';
+    else if (S.pin) sub = 'zoom in to break down the ring';
+    return { name: 'Nationwide', sub, T: nationTally(), nation: true };
+  }
+  const test = ring ? makeInRingPoly(ring) : viewTest();
+  const T = newTally();
+  const seen = new Set();
+  for (const ft of S.map.querySourceFeatures('tiles', { sourceLayer: 'crashes' })) {
+    const p = ft.properties;
+    const key = p.s + ':' + p.y + ':' + p.c;
+    if (seen.has(key)) continue;
+    const g = ft.geometry.coordinates;
+    if (!test(g[0], g[1])) continue;
+    seen.add(key);
+    tallyAdd(T, p);
+  }
+  if (ring) {
+    return { name: 'Within ' + ring.mi + ' mi', sub: S.lens ? 'of the cursor' : (ring.name || 'the pin'), T };
+  }
+  return { name: 'In this view', sub: null, T };
+}
+
+const sumRange = (arr, lo, hi) => {
+  let s = 0;
+  for (let i = lo; i <= hi; i++) s += arr[i];
+  return s;
+};
+
+function hourName(h) {
+  if (h === 0) return 'midnight';
+  if (h === 12) return 'noon';
+  return (h % 12) + (h < 12 ? ' AM' : ' PM');
+}
+
+function whyReport() {
+  const sc = whyScope();
+  if (!sc) return null;
+  const years = S.d.meta.years;
+  const lo = S.yearLo; const hi = S.yearHi;
+  const out = {
+    scope: sc.name,
+    detail: sc.sub || null,
+    nationwide: !!sc.nation,
+    years: { from: years[lo], to: years[hi] },
+    factor: S.why ? FACTOR_BY.get(S.why).key : null,
+    pending: !!sc.pending,
+  };
+  if (sc.pending) return out;
+  const T = sc.T;
+  const N = sc.nation ? T : nationTally();
+  out.deaths = sumRange(T.d, lo, hi);
+  out.crashes = sumRange(T.c, lo, hi);
+  out.matching = S.why ? sumRange(T.sel, lo, hi) : out.deaths;
+  out.perYear = Array.from(T.sel);
+  out.rows = FACTORS.map((x) => {
+    const since = years[sinceIndex(x.l)];
+    const a = Math.max(lo, sinceIndex(x.l));
+    const row = { l: x.l, key: x.key, label: x.label, group: WHY_GROUPS[x.g], since, available: a <= hi };
+    if (!row.available) return row;
+    const td = sumRange(T.d, a, hi);
+    const fd = sumRange(T.f[x.l], a, hi);
+    const nd = sumRange(N.d, a, hi);
+    const nf = sumRange(N.f[x.l], a, hi);
+    row.deaths = fd;
+    row.of = td;
+    row.share = td ? fd / td : 0;
+    row.nationalShare = nd ? nf / nd : 0;
+    row.partial = a > lo;
+    row.ratio = !sc.nation && td >= WHY_MIN_DEATHS && row.nationalShare > 0
+      ? row.share / row.nationalShare : null;
+    return row;
+  });
+  const byDay = new Array(8).fill(0);
+  const byHour = new Array(24).fill(0);
+  let whenTotal = 0;
+  for (let t = 0; t < 168; t++) {
+    const v = T.when[t];
+    byDay[Math.floor(t / 24) + 1] += v;
+    byHour[t % 24] += v;
+    whenTotal += v;
+  }
+  out.when = { grid: Array.from(T.when), total: whenTotal, byHour };
+  if (whenTotal >= 12) {
+    let bd = 1;
+    for (let d = 2; d <= 7; d++) if (byDay[d] > byDay[bd]) bd = d;
+    let bh = 0;
+    for (let h = 1; h < 24; h++) if (byHour[h] > byHour[bh]) bh = h;
+    let dark = 0;
+    for (let h = 0; h < 24; h++) if (h >= 20 || h < 5) dark += byHour[h];
+    out.when.worstDay = DOW[bd];
+    out.when.worstHour = hourName(bh);
+    out.when.lateNightShare = dark / whenTotal;
+  }
+  return out;
+}
+
+let whyTimer = 0;
+
+function scheduleWhy() {
+  updateWhyChip();
+  if (!S.whyOpen) return;
+  clearTimeout(whyTimer);
+  whyTimer = setTimeout(renderWhy, 140);
+}
+
+function updateWhyChip() {
+  const x = S.why ? FACTOR_BY.get(S.why) : null;
+  $('stats-why').hidden = !x;
+  if (x) $('stats-why-label').textContent = 'ONLY · ' + x.label.toUpperCase();
+}
+
+const pctText = (v) => (v > 0 && v < 0.01 ? '<1%' : Math.round(v * 100) + '%');
+
+function renderWhy() {
+  if (!S.d) return;
+  if (!S.whyNat) {
+    $('why-kicker').textContent = 'BREAKDOWN UNAVAILABLE';
+    $('why-total').textContent = 'Could not load the breakdown. Refresh to retry.';
+    return;
+  }
+  const R = whyReport();
+  if (!R) return;
+  S.whyLast = R;
+  const span = R.years.from + (R.years.from === R.years.to ? '' : '–' + R.years.to);
+  $('why-kicker').textContent = R.scope.toUpperCase() + ' · ' + span;
+  $('why-sub').textContent = R.detail || '';
+  $('why-sub').hidden = !R.detail;
+  const x = S.why ? FACTOR_BY.get(S.why) : null;
+  if (R.pending) {
+    $('why-total').innerHTML = '<b>…</b>';
+    $('why-active').hidden = true;
+    return;
+  }
+  $('why-total').innerHTML = '<b>' + fmt(R.deaths) + '</b> killed in ' + fmt(R.crashes)
+    + (R.crashes === 1 ? ' crash' : ' crashes');
+  $('why-active').hidden = !x;
+  if (x) {
+    const since = S.d.meta.years[sinceIndex(x.l)];
+    const row = R.rows.find((r) => r.l === x.l);
+    $('why-active-text').innerHTML = since > R.years.to
+      ? 'Mapping only crashes where ' + esc(x.only) + ' — but FARS does not record that before '
+        + since + '. Widen the years to see them.'
+      : 'Mapping only crashes where ' + esc(x.only) + ': <b>' + fmt(R.matching) + '</b> killed'
+        + (row && row.of ? ' (' + pctText(row.share) + ')' : '')
+        + (since > R.years.from ? ', ' + since + ' on' : '');
+  }
+  renderTrend(R);
+  renderWhyRows(R);
+  renderWhen(R, x);
+}
+
+function renderTrend(R) {
+  const box = $('why-trend');
+  const years = S.d.meta.years;
+  if (box.childElementCount !== years.length) {
+    box.innerHTML = '';
+    for (let i = 0; i < years.length; i++) box.appendChild(document.createElement('i'));
+    $('why-y0').textContent = years[0];
+    $('why-y1').textContent = years[years.length - 1];
+  }
+  const vals = R.perYear;
+  const max = Math.max(1, ...vals);
+  const x = S.why ? FACTOR_BY.get(S.why) : null;
+  const lo = x ? sinceIndex(x.l) : 0;
+  Array.from(box.children).forEach((bar, i) => {
+    bar.style.height = (vals[i] ? Math.max(6, Math.round((vals[i] / max) * 100)) : 0) + '%';
+    bar.classList.toggle('off', i < S.yearLo || i > S.yearHi);
+    bar.classList.toggle('na', i < lo);
+    bar.title = years[i] + ' — ' + (i < lo ? 'not recorded before ' + years[lo] : fmt(vals[i]) + ' killed');
+  });
+  $('why-trend-label').textContent = 'killed per year' + (x ? ' · ' + x.label.toLowerCase() : '');
+}
+
+function renderWhyRows(R) {
+  R = R || S.whyLast;
+  const box = $('why-rows');
+  if (!R || !R.rows) return;
+  const parts = [];
+  if (!R.nationwide) {
+    parts.push('<div class="why-legend"><span class="lg-bar"></span>here'
+      + '<span class="lg-tick"></span>nationwide, same years</div>');
+  }
+  let g = null;
+  for (const row of R.rows) {
+    if (row.group !== g) {
+      g = row.group;
+      parts.push('<h4 class="why-h">' + esc(g) + '</h4>');
+    }
+    const on = S.why === row.l;
+    if (!row.available) {
+      parts.push('<button class="wr na' + (on ? ' on' : '') + '" data-l="' + row.l
+        + '" disabled title="FARS does not record this before '
+        + row.since + '"><span class="wr-label">' + esc(row.label) + '</span>'
+        + '<span class="wr-pct">—</span><span class="wr-vs">from ' + row.since + '</span></button>');
+      continue;
+    }
+    let vs = '';
+    let vsCls = '';
+    if (row.ratio != null) {
+      if (row.ratio >= 1.2) { vs = row.ratio.toFixed(row.ratio >= 10 ? 0 : 1) + '× US'; vsCls = ' up'; }
+      else if (row.ratio <= 0.83) { vs = (row.ratio < 0.1 ? '<0.1' : row.ratio.toFixed(1)) + '× US'; vsCls = ' down'; }
+      else vs = '≈ US';
+    }
+    const w = Math.min(100, row.share * 100);
+    const tick = R.nationwide ? '' : '<b style="left:' + Math.min(100, row.nationalShare * 100).toFixed(1) + '%"></b>';
+    const tip = fmt(row.deaths) + ' of ' + fmt(row.of) + ' killed (' + pctText(row.share) + ')'
+      + (row.partial ? ', ' + row.since + ' on' : '')
+      + (R.nationwide ? '' : ' · nationwide ' + pctText(row.nationalShare))
+      + (on ? ' · tap to show every crash again' : ' · tap to map only these');
+    parts.push('<button class="wr' + (on ? ' on' : '') + '" data-l="' + row.l + '" aria-pressed="' + on
+      + '" title="' + esc(tip) + '">'
+      + '<span class="wr-label">' + esc(row.label)
+      + (row.partial ? '<small>since ' + row.since + '</small>' : '') + '</span>'
+      + '<span class="wr-pct">' + pctText(row.share) + '</span>'
+      + '<span class="wr-vs' + vsCls + '">' + vs + '</span>'
+      + '<span class="wr-bar"><i style="width:' + w.toFixed(1) + '%"></i>' + tick + '</span>'
+      + '</button>');
+  }
+  box.innerHTML = parts.join('');
+  box.classList.toggle('filtering', !!S.why);
+  box.classList.toggle('nat', !!R.nationwide);
+}
+
+function renderWhen(R, x) {
+  const box = $('why-when');
+  if (!box.childElementCount) {
+    const frag = document.createDocumentFragment();
+    for (const dow of DAY_ROWS) {
+      const lab = document.createElement('span');
+      lab.className = 'ww-day';
+      lab.textContent = DAY_SHORT[dow].slice(0, 2);
+      frag.appendChild(lab);
+      for (let h = 0; h < 24; h++) {
+        const c = document.createElement('i');
+        c.dataset.t = String((dow - 1) * 24 + h);
+        frag.appendChild(c);
+      }
+    }
+    box.appendChild(frag);
+  }
+  const grid = R.when.grid;
+  const max = Math.max(1, ...grid);
+  for (const c of box.querySelectorAll('i')) {
+    const t = Number(c.dataset.t);
+    const v = grid[t];
+    c.style.background = v ? 'rgba(255,122,51,' + (0.12 + 0.88 * (v / max)).toFixed(3) + ')' : '';
+    c.title = DOW[Math.floor(t / 24) + 1] + ', ' + hourName(t % 24) + ' hour — ' + fmt(v) + ' killed';
+  }
+  $('why-when-label').textContent = x ? '· ' + x.label.toLowerCase() : '';
+  const w = R.when;
+  let peak;
+  if (!w.worstDay) {
+    peak = w.total ? 'Too few deaths here to call a pattern.' : 'No recorded deaths here in these years.';
+  } else {
+    peak = 'Worst day <b>' + w.worstDay + '</b> · worst hour <b>' + w.worstHour + '</b> · <b>'
+      + pctText(w.lateNightShare) + '</b> between 8 PM and 5 AM';
+  }
+  $('why-peak').innerHTML = peak;
+  box.setAttribute('aria-label', w.worstDay
+    ? 'Deaths by day and hour. Worst day ' + w.worstDay + ', worst hour ' + w.worstHour + '.'
+    : 'Deaths by day and hour.');
+}
+
+function setWhyOpen(open, remember) {
+  S.whyOpen = !!open;
+  $('why').classList.toggle('open', S.whyOpen);
+  $('dock').classList.toggle('sheet', S.whyOpen);
+  $('why-head').setAttribute('aria-expanded', String(S.whyOpen));
+  $('why-open').setAttribute('aria-expanded', String(S.whyOpen));
+  if (remember && !isPhone()) {
+    try { localStorage.setItem(LS_WHY, S.whyOpen ? 'open' : 'closed'); } catch (e) { }
+  }
+  if (S.whyOpen) renderWhy();
+}
+
+function initWhy() {
+  let open = !isPhone() && innerHeight >= 560;
+  try {
+    const saved = localStorage.getItem(LS_WHY);
+    if (saved === 'closed') open = false;
+  } catch (e) { }
+  if (QS.get('why') && !isPhone()) open = true;
+  $('why-head').addEventListener('click', () => setWhyOpen(!S.whyOpen, true));
+  $('why-open').addEventListener('click', () => setWhyOpen(!S.whyOpen, true));
+  $('why-rows').addEventListener('click', (e) => {
+    const btn = e.target.closest('.wr');
+    if (!btn || btn.disabled) return;
+    setWhy(S.why === btn.dataset.l ? null : btn.dataset.l);
+  });
+  $('why-clear').addEventListener('click', () => setWhy(null));
+  $('stats-why-clear').addEventListener('click', () => setWhy(null));
+  setWhyOpen(open, false);
+  updateWhyChip();
+  if (QS.get('why') && !S.why) writeWhyToURL();
 }
 
 const SCHEMA = [

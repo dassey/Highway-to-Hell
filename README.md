@@ -13,6 +13,13 @@ Every fatal crash on American roads with a known location, 2001–2024.
   time, conditions, harmful event, each vehicle (year/make/model, speed,
   rollover, fire, hit-and-run), each person (age, role, restraint, ejection,
   outcome).
+- **See who died, and why.** A panel breaks down the country, the view, a pin's
+  ring, a road or a route: pedestrians, cyclists, motorcyclists, children,
+  drinking drivers, speeding, no seat belt, hit-and-run, large trucks, teen and
+  older drivers, darkness, rural roads, running off the road, head-on,
+  intersections — each against the national share for the same years — plus a
+  day × hour grid of when people died. Tap a row and the whole map shows only
+  those crashes; the link (`?why=ped`) keeps it.
 - **Drop a pin** — search a place or hit the crosshair — and a 1/3/5/10-mile ring
   scopes every count to it.
 - **Search a road** to isolate its crashes coast to coast: `I-40` → its whole
@@ -22,9 +29,10 @@ Every fatal crash on American roads with a known location, 2001–2024.
   worst stretches.
 - **Switch basemaps** between CARTO Dark Matter and an OpenFreeMap street style.
 - **Drive it from an AI assistant.** Where the browser supports WebMCP, the page
-  registers 13 tools (`assets/js/webmcp.js`) — read the view, move the map, set
+  registers 15 tools (`assets/js/webmcp.js`) — read the view, move the map, set
   years, search places and roads, drop the pin, check a route, list crashes, pull
-  a case file, screenshot the map, switch basemaps.
+  a case file, break down who died and why, map one factor, screenshot the map,
+  switch basemaps.
 
 ## Where the data comes from
 
@@ -43,6 +51,9 @@ The scripts in `scripts/` turn those CSVs into static files:
 | `data/s/<fips>.json` | per-state crash packs, lazy-loaded |
 | `data/roads.json` | road search index, lazy-loaded |
 | `data/d/<year>_<fips>.json` | per-crash case files, loaded per tap |
+| `data/why.json` | national who/why totals by year, loaded on boot |
+| `data/g/<factor>.json` | one factor's heat grid and day × hour totals, loaded per tap |
+| `data/f/<fips>.json` | who/why flags and hour for each crash in a state pack |
 
 Basemap tiles come from CARTO and OpenFreeMap, place search from
 [Photon](https://photon.komoot.io), routing from [OSRM](http://project-osrm.org).
@@ -52,7 +63,8 @@ Everything else is served from this repo.
 
 ```bash
 python3 scripts/build_data.py     # 2001–2024, downloads FARS zips as needed
-python3 scripts/build_tiles.py    # crash dot tiles
+python3 scripts/build_factors.py  # who/why flags from the case files
+python3 scripts/build_tiles.py    # crash dot tiles, with those flags
 python3 scripts/build_states.py   # state outlines
 ```
 

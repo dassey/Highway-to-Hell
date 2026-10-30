@@ -12,7 +12,7 @@
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="assets/fonts/fonts.css">
 <link rel="stylesheet" href="assets/vendor/maplibre-gl.css">
-<link rel="stylesheet" href="assets/css/style.css?v=7">
+<link rel="stylesheet" href="assets/css/style.css?v=8">
 </head>
 <body>
 
@@ -83,25 +83,57 @@
   <button class="rb-clear" id="rb-clear" aria-label="Clear road filter">×</button>
 </div>
 
-<aside class="stats" id="stats" aria-live="polite">
-  <div class="stats-head">
-    <div class="stats-kicker" id="stats-kicker">IN THIS VIEW</div>
-    <button class="pin-clear" id="pin-clear" aria-label="Clear location pin" hidden>×</button>
-  </div>
-  <div class="stats-nums"><b id="stat-d">—</b><i>\</i><span id="stat-c">—</span></div>
-  <div class="stats-sub" id="stats-sub">deaths\crashes · zoom in to see every crash</div>
-  <div class="radius-row" id="radius-row" hidden>
-    <span class="radius-label">RADIUS</span>
-    <button class="rchip" data-mi="1">1 mi</button>
-    <button class="rchip" data-mi="3">3 mi</button>
-    <button class="rchip on" data-mi="5">5 mi</button>
-    <button class="rchip" data-mi="10">10 mi</button>
-  </div>
-  <div class="stats-attrib">©&nbsp;<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>
-    ©&nbsp;<a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>
-    ©&nbsp;<a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a> ·
-    <a href="https://www.nhtsa.gov/research-data/fatality-analysis-reporting-system-fars" target="_blank" rel="noopener">NHTSA&nbsp;FARS</a></div>
-</aside>
+<div class="dock" id="dock">
+  <section class="why" id="why" aria-labelledby="why-title">
+    <button class="why-head" id="why-head" aria-expanded="false" aria-controls="why-body">
+      <span class="why-grip" aria-hidden="true"></span>
+      <span class="why-title" id="why-title">Who died, and why</span>
+      <span class="why-caret" aria-hidden="true"></span>
+    </button>
+    <div class="why-body" id="why-body">
+      <div class="why-kicker" id="why-kicker">—</div>
+      <div class="why-sub" id="why-sub" hidden></div>
+      <div class="why-total" id="why-total">—</div>
+      <div class="why-trend" id="why-trend" aria-hidden="true"></div>
+      <div class="why-axis" aria-hidden="true"><span id="why-y0"></span><span id="why-trend-label">killed per year</span><span id="why-y1"></span></div>
+      <div class="why-active" id="why-active" hidden>
+        <span id="why-active-text"></span>
+        <button class="why-clear" id="why-clear">SHOW ALL</button>
+      </div>
+      <div class="why-rows" id="why-rows" role="group" aria-label="Map only crashes that match"></div>
+      <h4 class="why-h">When <span id="why-when-label"></span></h4>
+      <div class="why-when" id="why-when" role="img" aria-label="Deaths by day and hour"></div>
+      <div class="why-hours" aria-hidden="true"><span>12a</span><span>6a</span><span>noon</span><span>6p</span><span>11p</span></div>
+      <p class="why-peak" id="why-peak"></p>
+      <p class="why-note">Tap a row to map only those crashes. Each row counts everyone killed in crashes that match it, so a crash can count in several rows. Comparisons are against the whole country over the same years.</p>
+    </div>
+  </section>
+
+  <aside class="stats" id="stats" aria-live="polite">
+    <div class="stats-head">
+      <div class="stats-kicker" id="stats-kicker">IN THIS VIEW</div>
+      <button class="pin-clear" id="pin-clear" aria-label="Clear location pin" hidden>×</button>
+    </div>
+    <div class="stats-nums"><b id="stat-d">—</b><i>\</i><span id="stat-c">—</span></div>
+    <div class="stats-sub" id="stats-sub">deaths\crashes · zoom in to see every crash</div>
+    <div class="stats-why" id="stats-why" hidden>
+      <span id="stats-why-label"></span>
+      <button class="stats-why-x" id="stats-why-clear" aria-label="Show every crash again">×</button>
+    </div>
+    <div class="radius-row" id="radius-row" hidden>
+      <span class="radius-label">RADIUS</span>
+      <button class="rchip" data-mi="1">1 mi</button>
+      <button class="rchip" data-mi="3">3 mi</button>
+      <button class="rchip on" data-mi="5">5 mi</button>
+      <button class="rchip" data-mi="10">10 mi</button>
+    </div>
+    <button class="why-open" id="why-open" aria-controls="why" aria-expanded="false">WHO DIED, AND WHY <span aria-hidden="true">›</span></button>
+    <div class="stats-attrib">©&nbsp;<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>
+      ©&nbsp;<a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>
+      ©&nbsp;<a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a> ·
+      <a href="https://www.nhtsa.gov/research-data/fatality-analysis-reporting-system-fars" target="_blank" rel="noopener">NHTSA&nbsp;FARS</a></div>
+  </aside>
+</div>
 
 <aside class="panel" id="panel" hidden aria-label="Crash details">
   <div class="panel-grip" aria-hidden="true"></div>
@@ -143,6 +175,15 @@
       <li><span class="k k-years"></span><div>The bars are deaths per year. Drag the two handles to narrow
         the map to a span of years.</div></li>
     </ul>
+
+    <h3>Who died, and why</h3>
+    <p>The panel on the left breaks down whatever you are looking at — the whole country, the view once you zoom
+      in, your pin's ring, a road or a route — by who was killed and what was involved. Each bar is that share of
+      the deaths here; the tick is the share nationwide over the same years, so whatever is unusual about a place
+      stands out. Tap a row and the whole map — heat, dots, counts, roads and routes — shows only those crashes,
+      and the day-by-hour grid shows when they happened. A row counts everyone killed in crashes that match it.
+      FARS records speeding from 2009, head-on and intersection crashes from 2010 and seat belt use from 2015, so
+      those rows only count those years.</p>
 
     <h3>The data</h3>
     <p>Crash records come from NHTSA's <a href="https://www.nhtsa.gov/research-data/fatality-analysis-reporting-system-fars"
@@ -191,7 +232,7 @@
 
 <script src="assets/vendor/maplibre-gl.js"></script>
 <script src="assets/js/settings.js?v=9"></script>
-<script src="assets/js/app.js?v=10"></script>
-<script src="assets/js/webmcp.js?v=2"></script>
+<script src="assets/js/app.js?v=11"></script>
+<script src="assets/js/webmcp.js?v=3"></script>
 </body>
 </html>

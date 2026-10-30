@@ -95,6 +95,7 @@
       individualCrashesVisible: dotsVisible(),
       zoomForIndividualCrashes: TILE_MIN,
       basemap: S.base === 'light' ? 'street' : 'dark',
+      factor: S.why ? FACTOR_BY.get(S.why).key : null,
       pin: S.pin ? { lat: S.pin.lat, lng: S.pin.lng, radiusMiles: S.pin.mi, name: S.pin.name } : null,
       road: S.roadSel ? { name: S.roadSel.name, toll: splitDC($('rb-nums')) } : null,
       route: S.route
@@ -289,6 +290,59 @@
 
   const yearSpan = () => years()[S.yearLo] + '–' + years()[S.yearHi];
 
+  const FACTOR_KEYS = FACTORS.map((x) => x.key);
+  const pct = (v) => (v > 0 && v < 0.01 ? '<1%' : Math.round(v * 100) + '%');
+
+  function breakdown() {
+    if (!S.whyNat) throw new Error('The breakdown data did not load — reload the page.');
+    const R = whyReport();
+    if (!R || R.pending) throw new Error('The map is still gathering crashes for this selection — try again in a moment.');
+    return {
+      scope: R.scope,
+      detail: R.detail,
+      nationwide: R.nationwide,
+      yearRange: R.years,
+      deaths: R.deaths,
+      crashes: R.crashes,
+      mappedFactor: R.factor,
+      factors: R.rows.map((r) => (r.available
+        ? {
+          factor: r.key, label: r.label, group: r.group, deaths: r.deaths, share: Number(r.share.toFixed(4)),
+          nationalShare: Number(r.nationalShare.toFixed(4)),
+          timesNational: r.ratio == null ? null : Number(r.ratio.toFixed(2)),
+          recordedFrom: r.since,
+        }
+        : { factor: r.key, label: r.label, group: r.group, notRecordedBefore: r.since })),
+      when: {
+        worstDay: R.when.worstDay || null,
+        worstHour: R.when.worstHour || null,
+        shareBetween8pmAnd5am: R.when.lateNightShare == null ? null : Number(R.when.lateNightShare.toFixed(4)),
+        deathsByHour: R.when.byHour,
+      },
+    };
+  }
+
+  function breakdownText(B) {
+    const lines = [B.scope + (B.detail ? ' (' + B.detail + ')' : '') + ', ' + B.yearRange.from + '–' + B.yearRange.to
+      + ': ' + fmt(B.deaths) + ' killed in ' + fmt(B.crashes) + ' crashes.'];
+    if (!B.deaths) return lines[0] + ' Nothing to break down.';
+    for (const f of B.factors) {
+      if (f.notRecordedBefore) {
+        lines.push(f.label + ': not recorded before ' + f.notRecordedBefore);
+        continue;
+      }
+      lines.push(f.label + ': ' + pct(f.share) + ' (' + fmt(f.deaths) + ')'
+        + (f.timesNational == null ? '' : ', ' + f.timesNational + '× the national ' + pct(f.nationalShare))
+        + (f.recordedFrom > B.yearRange.from ? ', since ' + f.recordedFrom : ''));
+    }
+    if (B.when.worstDay) {
+      lines.push('Worst day ' + B.when.worstDay + ', worst hour ' + B.when.worstHour + ', '
+        + pct(B.when.shareBetween8pmAnd5am) + ' between 8 PM and 5 AM.');
+    }
+    if (B.mappedFactor) lines.push('The map currently shows only: ' + B.mappedFactor + '.');
+    return lines.join('\n');
+  }
+
   const TOOLS = [
     {
       name: 'get_map_view',
@@ -333,6 +387,44 @@
             return ok('Years set to ' + yearSpan() + '. In this view: '
               + fmt(v.inView.deaths) + ' deaths in ' + fmt(v.inView.crashes) + ' crashes.', v);
           });
+      }),
+    },
+    {
+      name: 'get_breakdown',
+      description: 'Break down who died and why in whatever the map is focused on: the checked route, the isolated road, the pin ring, the current view once zoomed in to level 8, or the whole country when zoomed out. Returns each factor\'s share of deaths (pedestrians, cyclists, motorcyclists, children, drinking drivers, speeding, no seat belt, hit-and-run, large trucks, teen and older drivers, darkness, rural roads, running off the road, head-on, intersections), how that compares with the national share over the same years, and the worst day and hour.',
+      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      execute: () => ready().then(settle).then(() => {
+        const B = breakdown();
+        return ok(breakdownText(B), B);
+      }),
+    },
+    {
+      name: 'set_factor',
+      description: 'Map only the crashes that match one factor — the heat field, the dots, every count, the road toll and the route check all follow. Use "all" to show every crash again. Speeding is recorded from 2009, head-on and intersection from 2010, seat belt use from 2015.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          factor: {
+            type: 'string',
+            enum: ['all'].concat(FACTOR_KEYS),
+            description: 'ped, bike, moto, child, drink, speed, nobelt, hitrun, truck, teen (driver 15-20), older (driver 65+), dark, rural, offroad (a lone vehicle ran off the road), headon, junction — or all.',
+          },
+        },
+        required: ['factor'],
+        additionalProperties: false,
+      },
+      execute: (args) => ready().then(() => {
+        const x = args.factor === 'all' ? null : FACTORS.find((f) => f.key === args.factor);
+        if (args.factor !== 'all' && !x) throw new Error('Unknown factor "' + args.factor + '". Use one of: all, ' + FACTOR_KEYS.join(', ') + '.');
+        if (x && !S.whyNat) throw new Error('The breakdown data did not load — reload the page.');
+        return setWhy(x ? x.l : null).then((done) => {
+          if (!done || S.why !== (x ? x.l : null)) throw new Error('Could not load that factor — check the connection.');
+          return settle();
+        }).then(() => {
+          const v = viewState();
+          return ok((x ? 'Mapping only crashes where ' + x.only : 'Showing every crash again') + ', ' + yearSpan()
+            + '. In this view: ' + fmt(v.inView.deaths) + ' deaths in ' + fmt(v.inView.crashes) + ' crashes.', v);
+        });
       }),
     },
     {

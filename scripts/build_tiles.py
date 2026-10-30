@@ -8,7 +8,7 @@ import sys
 
 import numpy as np
 
-KEYS = ("f", "y", "s", "c", "rn")
+KEYS = ("f", "y", "s", "c", "rn", "k", "t")
 
 
 def varint(n):
@@ -55,12 +55,15 @@ def encode_tile(rows, extent, layer):
         return i
 
     feats = []
-    for px, py, f, y, s, c, rn in rows:
+    for px, py, f, y, s, c, rn, k, t in rows:
         tags = (varint(0) + varint(vi(int(f)))
                 + varint(1) + varint(vi(int(y)))
                 + varint(2) + varint(vi(int(s)))
                 + varint(3) + varint(vi(int(c)))
-                + varint(4) + varint(vi(rn)))
+                + varint(4) + varint(vi(rn))
+                + varint(5) + varint(vi(k)))
+        if t >= 0:
+            tags += varint(6) + varint(vi(int(t)))
         geom = varint(9) + varint(zigzag(int(px))) + varint(zigzag(int(py)))
         feats.append(ld(2, ld(2, tags) + tag(3, 0) + varint(1) + ld(4, geom)))
 
@@ -73,7 +76,15 @@ def encode_tile(rows, extent, layer):
     return ld(3, body)
 
 
+def factor_letters(data_dir):
+    path = os.path.join(data_dir, "why.json")
+    if not os.path.exists(path):
+        return ""
+    return json.load(open(path, encoding="utf-8"))["letters"]
+
+
 def load_points(data_dir):
+    letters = factor_letters(data_dir)
     lon = []
     lat = []
     f = []
@@ -83,6 +94,8 @@ def load_points(data_dir):
     names = []
     name_idx = {}
     rn = []
+    k = []
+    t = []
     for fp in sorted(os.listdir(os.path.join(data_dir, "s"))):
         if not fp.endswith(".json"):
             continue
@@ -104,13 +117,21 @@ def load_points(data_dir):
         s.append(np.full(len(p["lat"]), p["si"], dtype=np.int16))
         c.append(np.array(p["c"], dtype=np.int64))
         rn.append(gid[np.array(p["r"], dtype=np.int32)])
+        fpath = os.path.join(data_dir, "f", fp)
+        if letters and os.path.exists(fpath):
+            fx = json.load(open(fpath, encoding="utf-8"))
+            k.extend("".join(L for b, L in enumerate(letters) if m >> b & 1) for m in fx["k"])
+            t.append(np.array(fx["t"], dtype=np.int16))
+        else:
+            k.extend([""] * len(p["lat"]))
+            t.append(np.full(len(p["lat"]), -1, dtype=np.int16))
     return (np.concatenate(lon) / 1e5, np.concatenate(lat) / 1e5,
             np.concatenate(f), np.concatenate(y), np.concatenate(s),
-            np.concatenate(c), np.concatenate(rn), names)
+            np.concatenate(c), np.concatenate(rn), names, k, np.concatenate(t))
 
 
 def build(data_dir, out_dir, zooms, extents, buffer_frac):
-    lon, lat, f, y, s, c, rn, names = load_points(data_dir)
+    lon, lat, f, y, s, c, rn, names, k, t = load_points(data_dir)
     n = len(lon)
     print(f"{n} points, {len(names)} road names", flush=True)
 
@@ -152,7 +173,7 @@ def build(data_dir, out_dir, zooms, extents, buffer_frac):
                     if key[0] < 0 or key[1] < 0 or key[0] >= nt or key[1] >= nt:
                         continue
                     cells.setdefault(key, []).append(
-                        (ax, by, f[i], y[i], s[i], c[i], names[rn[i]]))
+                        (ax, by, f[i], y[i], s[i], c[i], names[rn[i]], k[i], t[i]))
 
         total = 0
         biggest = 0
