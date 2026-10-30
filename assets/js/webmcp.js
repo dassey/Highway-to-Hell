@@ -69,7 +69,7 @@
     const w = b.getWest(); const e = b.getEast();
     const so = b.getSouth(); const n = b.getNorth();
     const wrap = e < w;
-    const [d, c] = gridCount((la, lo) => {
+    const [d, c] = viewCount((la, lo) => {
       if (la < so || la > n) return false;
       return wrap ? !(lo < w && lo > e) : !(lo < w || lo > e);
     });

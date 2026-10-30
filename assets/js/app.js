@@ -16,6 +16,11 @@ const DEFAULTS = {
     outlineWidthByZoom: { 8.6: 0.4, 11: 1.4 },
     outlineColor: { dark: 'rgba(8,8,10,0.8)', light: 'rgba(255,255,255,0.9)' },
     outsideRingColor: '#7c2013', outsideRingOpacity: 0.22 },
+  heat: { kernelPxByZoom: { 3: 0.9, 5: 1.3, 7: 2.2, 9: 3 }, decadesByZoom: { 2: 2.5, 3: 2.2, 5: 1.95, 7: 1.7, 9: 1.5 }, singleDeath: 0.18,
+    gamma: 1, anchorLog2ByZoom: { 2: 5.6, 3: 4, 5: 2, 7: 0 }, maxGain: 6, refLat: 38, cellPx: { desktop: 1.5, phone: 1.25 }, maxCells: 2600000, overscan: 0.15,
+    liveEveryMs: 160, liveBudgetMs: 45, maxOpacity: 0.95, fadeOutFrom: 8, fadeOutTo: 9.5,
+    colorByDensityPct: { 0: 'rgba(0,0,0,0)', 10: 'rgba(58,5,5,0.5)', 30: '#7a0e0e', 55: '#c22815',
+      78: '#ff5a1f', 93: '#ffa542', 100: '#ffe0a3' } },
   selection: { ringColor: '#ffc46b', ringWidth: 2.2,
     ringSizeByZoom: { 7: 9, 12: 13, 16: 18 } },
   stateLines: { color: { dark: 'rgba(233,228,221,0.16)', light: 'rgba(40,40,55,0.3)' },
@@ -82,6 +87,8 @@ const packUrl = (fips) => 'data/s/' + fips + '.json' + DATA_V;
 const factorUrl = (fips) => 'data/f/' + fips + '.json' + DATA_V;
 const whyGridUrl = (l) => 'data/g/' + l + '.json' + DATA_V;
 const WHY_URL = 'data/why.json' + DATA_V;
+const HEAT_URL = 'data/heat.bin' + DATA_V;
+const HEAT_K_URL = 'data/heat-k.bin' + DATA_V;
 const TILE_URL = new URL('data/t/', location.href).href + '{z}/{x}/{y}.pbf' + DATA_V;
 const TILE_MIN = FILE_SET.dots.tileDetailZoom - 1;
 const TILE_MAX = FILE_SET.dots.tileDetailZoom;
@@ -150,16 +157,8 @@ const ptsColor = () => ['interpolate', ['linear'], ['get', 'f']]
   .concat(rampPairs(SET.dots.colorByDeaths));
 const ptsStrokeW = () => ['interpolate', ['linear'], ['zoom']]
   .concat(rampPairs(SET.dots.outlineWidthByZoom));
-const heatWeight = () => ['interpolate', ['linear'], ['get', 'w']]
-  .concat(rampPairs(SET.heat.weightByDeaths));
-const heatIntensity = () => ['interpolate', ['linear'], ['zoom']]
-  .concat(rampPairs(SET.heat.intensityByZoom).map((v, i) => (i % 2 ? v * S.heatGain : v)));
-const heatRadius = () => ['interpolate', ['linear'], ['zoom']]
-  .concat(rampPairs(SET.heat.radiusByZoom));
 const heatOpacity = () => ['interpolate', ['linear'], ['zoom'],
   SET.heat.fadeOutFrom, SET.heat.maxOpacity, SET.heat.fadeOutTo, 0];
-const heatColor = () => ['interpolate', ['linear'], ['heatmap-density']]
-  .concat(rampPairs(SET.heat.colorByDensityPct).map((v, i) => (i % 2 ? v : v / 100)));
 const heatMaxZoom = () => Math.ceil(SET.heat.fadeOutTo);
 const selRadius = () => ['interpolate', ['linear'], ['zoom']]
   .concat(rampPairs(SET.selection.ringSizeByZoom));
@@ -232,7 +231,6 @@ const fmt = (n) => n.toLocaleString('en-US');
 const S = window.__S = {
   d: null,
   grid: null,
-  gridFC: null,
   gridW: null,
   gridN: null,
   packs: new Map(),
@@ -260,7 +258,7 @@ const S = window.__S = {
   why: null,
   whyNat: null,
   whyGrids: new Map(),
-  heatGain: 1,
+  heat: null,
 };
 
 S.base = SET.basemap.start === 'light' ? 'light' : 'dark';
@@ -272,6 +270,7 @@ if (SET.basemap.rememberChoice) {
 }
 
 const WHY0 = readWhyFromURL();
+const HEAT0 = loadHeat().catch(() => null);
 
 Promise.all([
   fetch(BOOT_URL).then((r) => {
@@ -283,11 +282,14 @@ Promise.all([
   loadStyle(S.base).catch(() => null),
   getJSON(WHY_URL).catch(() => null),
   WHY0 ? loadWhyGrid(WHY0).catch(() => null) : null,
-]).then(([boot, statesGeo, baseStyle, whyNat, whyGrid]) => {
+  HEAT0,
+  WHY0 ? HEAT0.then((h) => (h ? loadHeatK(h) : null)).catch(() => null) : null,
+]).then(([boot, statesGeo, baseStyle, whyNat, whyGrid, heat, heatK]) => {
   S.d = boot;
   S.statesGeo = statesGeo;
   S.whyNat = whyNat;
-  if (whyNat && whyGrid) S.why = WHY0;
+  S.heat = heat;
+  if (whyNat && whyGrid && (!heat || heatK)) S.why = WHY0;
   buildStateShapes(statesGeo);
   S.yearHi = boot.meta.years.length - 1;
   setLoader(fmt(boot.meta.deaths) + ' deaths · ' + fmt(boot.meta.crashes) + ' crashes · rendering…');
@@ -383,6 +385,404 @@ function loadStyle(base) {
   });
 }
 
+const HEAT = {
+  canvas: null, ctx: null, img: null, grid: null, tmp: null, w: 0, h: 0,
+  lut: null, lutBase: null, timer: 0, last: 0, cost: 0, hidden: false,
+};
+const EARTH_KM = 40075.017;
+
+function heatCanvas() {
+  if (!HEAT.canvas) {
+    HEAT.canvas = document.createElement('canvas');
+    HEAT.canvas.width = 1;
+    HEAT.canvas.height = 1;
+    HEAT.ctx = HEAT.canvas.getContext('2d');
+  }
+  return HEAT.canvas;
+}
+
+function loadHeat() {
+  return fetch(HEAT_URL).then((r) => {
+    if (!r.ok) throw new Error('heat ' + r.status);
+    return r.arrayBuffer();
+  }).then((buf) => {
+    const dv = new DataView(buf);
+    if (dv.getUint32(0, true) !== 0x33483248) throw new Error('heat format');
+    const n = dv.getUint32(4, true);
+    const top = dv.getUint16(10, true);
+    const x0 = dv.getFloat64(12, true);
+    const x1 = dv.getFloat64(20, true);
+    const y0 = dv.getFloat64(28, true);
+    const y1 = dv.getFloat64(36, true);
+    const dx = new Uint16Array(buf, 44, n);
+    const dy = new Uint16Array(buf, 44 + 2 * n, n);
+    const qx = new Uint16Array(n);
+    const qy = new Uint16Array(n);
+    let x = 0; let y = 0;
+    for (let i = 0; i < n; i++) {
+      if (dy[i]) { y += dy[i]; x = dx[i]; } else x += dx[i];
+      qx[i] = x;
+      qy[i] = y;
+    }
+    return {
+      n, qx, qy,
+      yr: new Uint8Array(buf, 44 + 4 * n, n),
+      f: new Uint8Array(buf, 44 + 5 * n, n),
+      k: null, kp: null,
+      x0, sx: (x1 - x0) / top, y0, sy: (y1 - y0) / top,
+    };
+  });
+}
+
+function loadHeatK(H) {
+  if (!H) return Promise.reject(new Error('no heat'));
+  if (H.kp) return H.kp;
+  H.kp = fetch(HEAT_K_URL).then((r) => {
+    if (!r.ok) throw new Error('heat-k ' + r.status);
+    return r.arrayBuffer();
+  }).then((buf) => {
+    const dv = new DataView(buf);
+    if (dv.getUint32(0, true) !== 0x33483248 || dv.getUint32(4, true) !== H.n) throw new Error('heat-k format');
+    H.k = new Uint16Array(buf, 8, H.n);
+    return H.k;
+  }).catch((err) => {
+    H.kp = null;
+    throw err;
+  });
+  return H.kp;
+}
+
+function heatMask() {
+  if (!S.why) return 0;
+  return 1 << FACTORS.findIndex((x) => x.l === S.why);
+}
+
+function heatLUT() {
+  if (HEAT.lut && HEAT.lutBase === S.base) return HEAT.lut;
+  const fadeLow = S.base === 'light';
+  const src = SET.heat.colorByDensityPct;
+  const stops = Object.keys(src).map(Number).sort((a, b) => a - b).map((k) => {
+    const c = parseColor(src[k]);
+    const n = parseInt(c.hex.slice(1), 16);
+    return [k / 100, (n >> 16) & 255, (n >> 8) & 255, n & 255, c.a * 255];
+  });
+  const lut = new Uint32Array(256);
+  for (let i = 1; i < 256; i++) {
+    const t = i / 255;
+    let j = 0;
+    while (j < stops.length - 2 && stops[j + 1][0] < t) j++;
+    const a = stops[j]; const b = stops[Math.min(j + 1, stops.length - 1)];
+    const u = b[0] > a[0] ? Math.min(1, Math.max(0, (t - a[0]) / (b[0] - a[0]))) : 1;
+    const mix = (p) => Math.round(a[p] + (b[p] - a[p]) * u);
+    const alpha = fadeLow ? Math.round(mix(4) * Math.min(1, t / 0.45)) : mix(4);
+    lut[i] = ((alpha << 24) | (mix(3) << 16) | (mix(2) << 8) | mix(1)) >>> 0;
+  }
+  HEAT.lut = lut;
+  HEAT.lutBase = S.base;
+  return lut;
+}
+
+function gaussBoxes(sigma) {
+  const ideal = Math.sqrt((12 * sigma * sigma) / 3 + 1);
+  let wl = Math.floor(ideal);
+  if (wl % 2 === 0) wl--;
+  const m = Math.round((12 * sigma * sigma - 3 * wl * wl - 12 * wl - 9) / (-4 * wl - 4));
+  return [0, 1, 2].map((i) => ((i < m ? wl : wl + 2) - 1) / 2);
+}
+
+function boxH(src, dst, w, h, r) {
+  const inv = 1 / (r + r + 1);
+  for (let y = 0; y < h; y++) {
+    const b = y * w;
+    let acc = 0;
+    for (let i = 0; i <= r && i < w; i++) acc += src[b + i];
+    for (let i = 0; i < w; i++) {
+      dst[b + i] = acc * inv;
+      if (i + r + 1 < w) acc += src[b + i + r + 1];
+      if (i - r >= 0) acc -= src[b + i - r];
+    }
+  }
+}
+
+function boxV(src, dst, w, h, r, acc) {
+  const inv = 1 / (r + r + 1);
+  acc.fill(0, 0, w);
+  for (let y = 0; y <= r && y < h; y++) {
+    const b = y * w;
+    for (let x = 0; x < w; x++) acc[x] += src[b + x];
+  }
+  for (let y = 0; y < h; y++) {
+    const b = y * w;
+    for (let x = 0; x < w; x++) dst[b + x] = acc[x] * inv;
+    if (y + r + 1 < h) {
+      const a = (y + r + 1) * w;
+      for (let x = 0; x < w; x++) acc[x] += src[a + x];
+    }
+    if (y - r >= 0) {
+      const d = (y - r) * w;
+      for (let x = 0; x < w; x++) acc[x] -= src[d + x];
+    }
+  }
+}
+
+function kernH(src, dst, w, h, kern) {
+  const r = kern.length - 1;
+  for (let y = 0; y < h; y++) {
+    const b = y * w;
+    for (let i = 0; i < w; i++) {
+      let acc = src[b + i] * kern[0];
+      if (i >= r && i < w - r) {
+        for (let o = 1; o <= r; o++) acc += (src[b + i - o] + src[b + i + o]) * kern[o];
+      } else {
+        for (let o = 1; o <= r; o++) {
+          if (i - o >= 0) acc += src[b + i - o] * kern[o];
+          if (i + o < w) acc += src[b + i + o] * kern[o];
+        }
+      }
+      dst[b + i] = acc;
+    }
+  }
+}
+
+function kernV(src, dst, w, h, kern) {
+  const r = kern.length - 1;
+  const k0 = kern[0];
+  for (let y = 0; y < h; y++) {
+    const b = y * w;
+    for (let x = 0; x < w; x++) dst[b + x] = src[b + x] * k0;
+    for (let o = 1; o <= r; o++) {
+      const ko = kern[o];
+      if (y - o >= 0) {
+        const u = (y - o) * w;
+        for (let x = 0; x < w; x++) dst[b + x] += src[u + x] * ko;
+      }
+      if (y + o < h) {
+        const d = (y + o) * w;
+        for (let x = 0; x < w; x++) dst[b + x] += src[d + x] * ko;
+      }
+    }
+  }
+}
+
+let blurAcc = new Float64Array(0);
+
+function gaussBlur(grid, tmp, w, h, sigma) {
+  if (sigma < 0.3) return;
+  if (sigma < 1.6) {
+    const r = Math.ceil(sigma * 2.5);
+    const kern = new Float32Array(r + 1);
+    let sum = 0;
+    for (let o = 0; o <= r; o++) {
+      kern[o] = Math.exp(-(o * o) / (2 * sigma * sigma));
+      sum += o ? 2 * kern[o] : kern[o];
+    }
+    for (let o = 0; o <= r; o++) kern[o] /= sum;
+    kernH(grid, tmp, w, h, kern);
+    kernV(tmp, grid, w, h, kern);
+    return;
+  }
+  if (blurAcc.length < w) blurAcc = new Float64Array(w);
+  for (const r of gaussBoxes(sigma)) {
+    if (r < 1) continue;
+    boxH(grid, tmp, w, h, r);
+    boxV(tmp, grid, w, h, r, blurAcc);
+  }
+}
+
+const zoomRamp = (obj, z) => {
+  const ks = Object.keys(obj).map(Number).sort((a, b) => a - b);
+  if (z <= ks[0]) return obj[ks[0]];
+  for (let i = 1; i < ks.length; i++) {
+    if (z <= ks[i]) {
+      const u = (z - ks[i - 1]) / (ks[i] - ks[i - 1]);
+      return obj[ks[i - 1]] + (obj[ks[i]] - obj[ks[i - 1]]) * u;
+    }
+  }
+  return obj[ks[ks.length - 1]];
+};
+
+const peakMemo = new Map();
+function unitPeak(sigma) {
+  const key = sigma.toFixed(3);
+  let v = peakMemo.get(key);
+  if (v === undefined) {
+    const n = Math.max(9, Math.ceil(sigma * 8) | 1);
+    const a = new Float32Array(n * n);
+    const t = new Float32Array(n * n);
+    a[((n >> 1) * n) + (n >> 1)] = 1;
+    gaussBlur(a, t, n, n, sigma);
+    v = a[((n >> 1) * n) + (n >> 1)];
+    peakMemo.set(key, v);
+  }
+  return v;
+}
+
+function heatShare() {
+  const meta = S.d.meta;
+  let all = 0; let some = 0;
+  meta.years.forEach((yr, yi) => {
+    const d = meta.perYear[String(yr)].deaths;
+    all += d;
+    if (yi < S.yearLo || yi > S.yearHi) return;
+    some += S.why && S.whyNat ? S.whyNat.d[S.why][yi] : d;
+  });
+  return all ? some / all : 1;
+}
+
+function heatRender() {
+  clearTimeout(HEAT.timer);
+  HEAT.timer = 0;
+  const H = S.heat;
+  const map = S.map;
+  if (!H || !map || !S.layersReady || HEAT.hidden) return;
+  const src = map.getSource('heat');
+  if (!src || (S.why && !H.k)) return;
+  const z = map.getZoom();
+  if (z >= heatMaxZoom()) return;
+  const t0 = performance.now();
+
+  const b = map.getBounds();
+  const nw = maplibregl.MercatorCoordinate.fromLngLat([b.getWest(), Math.min(85, b.getNorth())]);
+  const se = maplibregl.MercatorCoordinate.fromLngLat([b.getEast(), Math.max(-85, b.getSouth())]);
+  const padX = (se.x - nw.x) * SET.heat.overscan;
+  const padY = (se.y - nw.y) * SET.heat.overscan;
+  const rx0 = nw.x - padX; const rx1 = se.x + padX;
+  const ry0 = Math.max(0, nw.y - padY); const ry1 = Math.min(1, se.y + padY);
+  const cellPx = IS_TOUCH ? SET.heat.cellPx.phone : SET.heat.cellPx.desktop;
+  let cw = cellPx / (512 * Math.pow(2, z));
+  const cap = SET.heat.maxCells;
+  const raw = ((rx1 - rx0) / cw) * ((ry1 - ry0) / cw);
+  if (raw > cap) cw *= Math.sqrt(raw / cap);
+  const gw = Math.max(1, Math.ceil((rx1 - rx0) / cw));
+  const gh = Math.max(1, Math.ceil((ry1 - ry0) / cw));
+  const cells = gw * gh;
+  if (!HEAT.grid || HEAT.grid.length < cells) {
+    HEAT.grid = new Float32Array(cells);
+    HEAT.tmp = new Float32Array(cells);
+  }
+  const grid = HEAT.grid.subarray(0, cells);
+  const tmp = HEAT.tmp.subarray(0, cells);
+  grid.fill(0);
+
+  const ax = H.sx / cw; const bx = (H.x0 - rx0) / cw;
+  const ay = H.sy / cw; const by = (H.y0 - ry0) / cw;
+  const qLo = Math.max(0, Math.ceil(-by / ay));
+  const qHi = Math.floor((gh - by) / ay);
+  let i = 0; let j = H.n;
+  while (i < j) {
+    const m = (i + j) >> 1;
+    if (H.qy[m] < qLo) i = m + 1; else j = m;
+  }
+  const lo = S.yearLo; const hi = S.yearHi;
+  const allYears = lo === 0 && hi === S.d.meta.years.length - 1;
+  const km = heatMask();
+  const { qx, qy, yr, f, k } = H;
+  for (; i < H.n; i++) {
+    const y = qy[i];
+    if (y > qHi) break;
+    const fx = qx[i] * ax + bx;
+    if (fx < 0 || fx >= gw) continue;
+    if (!allYears) {
+      const yy = yr[i];
+      if (yy < lo || yy > hi) continue;
+    }
+    if (km && !(k[i] & km)) continue;
+    const iy = (y * ay + by) | 0;
+    if (iy >= gh) continue;
+    grid[iy * gw + (fx | 0)] += f[i];
+  }
+
+  const sigma = Math.max(0.6, zoomRamp(SET.heat.kernelPxByZoom, z) / cellPx * ((cellPx / (512 * Math.pow(2, z))) / cw));
+  gaussBlur(grid, tmp, gw, gh, sigma);
+
+  const refCos = Math.cos(SET.heat.refLat * Math.PI / 180);
+  const anchor = Math.pow(2, Math.max(0, zoomRamp(SET.heat.anchorLog2ByZoom, z)));
+  const unit = unitPeak(sigma) * anchor / Math.min(SET.heat.maxGain, 1 / Math.max(1e-6, heatShare()));
+  const rowK = new Float32Array(gh);
+  for (let r = 0; r < gh; r++) {
+    const my = ry0 + (r + 0.5) * cw;
+    const c = Math.cos(Math.atan(Math.sinh(Math.PI * (1 - 2 * my))));
+    rowK[r] = (refCos * refCos) / (c * c) / unit;
+  }
+
+  if (HEAT.w !== gw || HEAT.h !== gh) {
+    HEAT.canvas.width = gw;
+    HEAT.canvas.height = gh;
+    HEAT.img = HEAT.ctx.createImageData(gw, gh);
+    HEAT.w = gw;
+    HEAT.h = gh;
+  }
+  const out = new Uint32Array(HEAT.img.data.buffer);
+  const lut = heatLUT();
+  const span = zoomRamp(SET.heat.decadesByZoom, z) * Math.LN10;
+  const floor = SET.heat.singleDeath;
+  const gamma = SET.heat.gamma;
+  for (let r = 0; r < gh; r++) {
+    const rk = rowK[r];
+    const base = r * gw;
+    for (let c = 0; c < gw; c++) {
+      const v = grid[base + c] * rk;
+      if (v <= 0.02) { out[base + c] = 0; continue; }
+      let t = v >= 1 ? floor + (1 - floor) * Math.pow(Math.min(1, Math.log(v) / span), gamma) : floor * v;
+      if (t > 1) t = 1;
+      out[base + c] = lut[(t * 255) | 0];
+    }
+  }
+  HEAT.ctx.putImageData(HEAT.img, 0, 0);
+
+  const tl = new maplibregl.MercatorCoordinate(rx0, ry0).toLngLat();
+  const br = new maplibregl.MercatorCoordinate(rx0 + gw * cw, ry0 + gh * cw).toLngLat();
+  src.setCoordinates([[tl.lng, tl.lat], [br.lng, tl.lat], [br.lng, br.lat], [tl.lng, br.lat]]);
+  src.play();
+  map.once('render', () => src.pause());
+  HEAT.last = performance.now();
+  HEAT.cost = HEAT.last - t0;
+}
+
+function scheduleHeat(now) {
+  if (now) {
+    heatRender();
+    return;
+  }
+  if (HEAT.timer || HEAT.cost > SET.heat.liveBudgetMs) return;
+  const wait = Math.max(0, SET.heat.liveEveryMs - (performance.now() - HEAT.last));
+  HEAT.timer = setTimeout(heatRender, wait);
+}
+
+function heatCount() {
+  const H = S.heat;
+  const b = S.map.getBounds();
+  const nw = maplibregl.MercatorCoordinate.fromLngLat([b.getWest(), Math.min(85, b.getNorth())]);
+  const se = maplibregl.MercatorCoordinate.fromLngLat([b.getEast(), Math.max(-85, b.getSouth())]);
+  const xLo = (nw.x - H.x0) / H.sx; const xHi = (se.x - H.x0) / H.sx;
+  const yLo = Math.max(0, Math.ceil((nw.y - H.y0) / H.sy));
+  const yHi = (se.y - H.y0) / H.sy;
+  let i = 0; let j = H.n;
+  while (i < j) {
+    const m = (i + j) >> 1;
+    if (H.qy[m] < yLo) i = m + 1; else j = m;
+  }
+  const lo = S.yearLo; const hi = S.yearHi;
+  const km = heatMask();
+  let d = 0; let c = 0;
+  for (; i < H.n; i++) {
+    if (H.qy[i] > yHi) break;
+    const x = H.qx[i];
+    if (x < xLo || x > xHi) continue;
+    const yy = H.yr[i];
+    if (yy < lo || yy > hi) continue;
+    if (km && !(H.k[i] & km)) continue;
+    d += H.f[i];
+    c += 1;
+  }
+  return [d, c];
+}
+
+function viewCount(inView) {
+  if (S.heat && (!S.why || S.heat.k)) return heatCount();
+  return gridCount(inView);
+}
+
 function buildGrid() {
   const g = S.d.grid;
   const res = g.res;
@@ -421,26 +821,6 @@ function computeGrid() {
     w[src.ci[i]] += src.cw[i];
     n[src.ci[i]] += src.cn[i];
   }
-  S.heatGain = 1;
-  if (S.why && S.whyNat && src !== g) {
-    const lo = Math.max(S.yearLo, sinceIndex(S.why));
-    let all = 0; let some = 0;
-    for (let yi = lo; yi <= S.yearHi; yi++) {
-      all += S.d.meta.perYear[String(S.d.meta.years[yi])].deaths;
-      some += S.whyNat.d[S.why][yi];
-    }
-    S.heatGain = some > 0 ? Math.min(12, Math.max(1, all / some)) : 1;
-  }
-  const feats = [];
-  for (let b = 0; b < g.nb; b++) {
-    if (!w[b]) continue;
-    feats.push({
-      type: 'Feature',
-      geometry: { type: 'Point', coordinates: [g.lonC[b], g.latC[b]] },
-      properties: { w: w[b] },
-    });
-  }
-  S.gridFC = { type: 'FeatureCollection', features: feats };
 }
 
 function yearOn(yi) { return yi >= S.yearLo && yi <= S.yearHi; }
@@ -628,6 +1008,10 @@ function applyFilters() {
   if (map.getLayer('heat')) {
     map.setLayoutProperty('heat', 'visibility', mode ? 'none' : 'visible');
   }
+  if (HEAT.hidden !== mode) {
+    HEAT.hidden = mode;
+    if (!mode) scheduleHeat(true);
+  }
   if (map.getLayer('mpts')) {
     map.setFilter('mpts', mode && yf.length ? ['all', ...yf] : (mode ? null : ['boolean', false]));
     map.setLayoutProperty('mpts', 'visibility', mode ? 'visible' : 'none');
@@ -733,6 +1117,7 @@ function initMap(baseStyle) {
       refreshViewport();
     }
     applyLiveSettings();
+    if (!S.heat) toast('The heat field could not load — zoom in to see the crashes.');
     map.once('idle', dismissLoader);
     setTimeout(dismissLoader, SET.interface.loaderTimeoutSeconds * 1000);
   });
@@ -740,7 +1125,11 @@ function initMap(baseStyle) {
   map.on('moveend', () => {
     syncData();
     scheduleRefresh();
+    scheduleHeat(true);
   });
+
+  map.on('move', () => scheduleHeat());
+  map.on('resize', () => scheduleHeat(true));
 
   map.on('sourcedata', (e) => {
     if (e.sourceId === 'tiles' && e.isSourceLoaded) scheduleRefresh();
@@ -808,7 +1197,13 @@ function addLayers() {
     data: { type: 'FeatureCollection', features: S.modeFeats },
   });
 
-  map.addSource('grid', { type: 'geojson', data: S.gridFC });
+  map.addSource('heat', {
+    type: 'canvas',
+    canvas: heatCanvas(),
+    coordinates: [[US_BOUNDS[0][0], US_BOUNDS[1][1]], [US_BOUNDS[1][0], US_BOUNDS[1][1]],
+      [US_BOUNDS[1][0], US_BOUNDS[0][1]], [US_BOUNDS[0][0], US_BOUNDS[0][1]]],
+    animate: false,
+  });
 
   map.addSource('pin-ring', {
     type: 'geojson',
@@ -824,17 +1219,16 @@ function addLayers() {
 
   map.addLayer({
     id: 'heat',
-    type: 'heatmap',
-    source: 'grid',
+    type: 'raster',
+    source: 'heat',
     maxzoom: heatMaxZoom(),
     paint: {
-      'heatmap-weight': heatWeight(),
-      'heatmap-intensity': heatIntensity(),
-      'heatmap-radius': heatRadius(),
-      'heatmap-opacity': heatOpacity(),
-      'heatmap-color': heatColor(),
+      'raster-opacity': heatOpacity(),
+      'raster-resampling': 'linear',
+      'raster-fade-duration': 0,
     },
   }, under);
+  HEAT.w = 0;
 
   map.addLayer({
     id: 'ring-fill',
@@ -1121,7 +1515,7 @@ function refreshCounts() {
     $('stats-kicker').textContent = 'IN THIS VIEW';
     $('stats-sub').textContent = DC + ' · tap a dot for the full record';
   } else {
-    const [d, c] = gridCount(inView);
+    const [d, c] = viewCount(inView);
     setNums(d, c);
     $('stats-kicker').textContent = 'IN THIS VIEW';
     $('stats-sub').textContent = DC + ' · zoom in to level ' + TILE_MIN
@@ -1687,6 +2081,7 @@ function setBase(base) {
         lensApply();
       }
       refreshViewport();
+      scheduleHeat(true);
     });
   }).catch(() => toast('Could not load that basemap — staying on this one.'));
 }
@@ -2336,10 +2731,7 @@ function writeWhyToURL() {
 const isPhone = () => matchMedia('(max-width: 900px)').matches;
 
 function pushGrid() {
-  if (!S.map || !S.layersReady) return;
-  const src = S.map.getSource('grid');
-  if (src) src.setData(S.gridFC);
-  if (S.map.getLayer('heat')) S.map.setPaintProperty('heat', 'heatmap-intensity', heatIntensity());
+  scheduleHeat(true);
 }
 
 function setWhy(l) {
@@ -2351,7 +2743,8 @@ function setWhy(l) {
   }
   const row = want && document.querySelector('.wr[data-l="' + want + '"]');
   if (row) row.classList.add('busy');
-  return (want ? loadWhyGrid(want) : Promise.resolve()).then(() => {
+  return (want ? Promise.all([loadWhyGrid(want), S.heat ? loadHeatK(S.heat) : null])
+    : Promise.resolve()).then(() => {
     if (S.whyWant !== want) return false;
     S.why = want;
     writeWhyToURL();
@@ -2759,6 +3152,10 @@ const SCHEMA = [
   ] },
   { group: 'Heat field', fields: [
     { path: 'heat.maxOpacity', label: 'Heat opacity', type: 'num', min: 0.1, max: 1, step: 0.02 },
+    { path: 'heat.decadesByZoom.3', label: 'Heat range, whole country (powers of ten)', type: 'num', min: 1, max: 4, step: 0.1 },
+    { path: 'heat.decadesByZoom.7', label: 'Heat range, region (powers of ten)', type: 'num', min: 1, max: 4, step: 0.1 },
+    { path: 'heat.kernelPxByZoom.3', label: 'Heat blur, whole country', type: 'num', min: 0.4, max: 6, step: 0.1 },
+    { path: 'heat.kernelPxByZoom.7', label: 'Heat blur, region', type: 'num', min: 0.4, max: 8, step: 0.1 },
     { path: 'heat.fadeOutFrom', label: 'Heat starts fading at zoom', type: 'num', min: 3, max: 9, step: 0.1 },
     { path: 'heat.fadeOutTo', label: 'Heat gone by zoom', type: 'num', min: 4, max: 12, step: 0.1 },
     { path: 'heat.colorByDensityPct.30', label: 'Thin', type: 'color' },
@@ -2879,11 +3276,9 @@ function applyLiveSettings() {
   setP('mpts', 'circle-stroke-color', T.ptStroke);
   setP('mpts', 'circle-opacity', SET.dots.maxOpacity);
   if (map.getLayer('heat')) map.setLayerZoomRange('heat', 0, heatMaxZoom());
-  setP('heat', 'heatmap-weight', heatWeight());
-  setP('heat', 'heatmap-intensity', heatIntensity());
-  setP('heat', 'heatmap-radius', heatRadius());
-  setP('heat', 'heatmap-opacity', heatOpacity());
-  setP('heat', 'heatmap-color', heatColor());
+  setP('heat', 'raster-opacity', heatOpacity());
+  HEAT.lut = null;
+  scheduleHeat(true);
   setP('sel-ring', 'circle-radius', selRadius());
   setP('sel-ring', 'circle-stroke-width', SET.selection.ringWidth);
   setP('sel-ring', 'circle-stroke-color', SET.selection.ringColor);

@@ -7,8 +7,10 @@ Every fatal crash on American roads with a known location, 2001–2024.
 
 ## What it does
 
-- **Zoom out** for a heat field of the whole country, filterable by year range
-  with the histogram slider.
+- **Zoom out** for a heat field drawn from all 821,145 crashes at screen
+  resolution — one death is a faint ember, and the interstates and cities burn
+  brightest because that is where people died close together. It follows the
+  year slider and any factor you pick, and fades into the dots as you zoom in.
 - **Zoom in** and every crash is a dot. Tap one for the FARS case file: date,
   time, conditions, harmful event, each vehicle (year/make/model, speed,
   rollover, fire, hit-and-run), each person (age, role, restraint, ejection,
@@ -45,14 +47,16 @@ The scripts in `scripts/` turn those CSVs into static files:
 
 | file | contents |
 | --- | --- |
-| `data/boot.json` | national heat grid + metadata, loaded on boot |
+| `data/boot.json` | metadata and a coarse national grid, loaded on boot |
+| `data/heat.bin` | every crash as a quantized point (year, deaths), loaded on boot for the heat field |
+| `data/heat-k.bin` | who/why flags for those points, loaded the first time a factor is picked |
 | `data/us-states.json` | state outlines |
 | `data/t/<z>/<x>/<y>.pbf` | crash dot tiles |
 | `data/s/<fips>.json` | per-state crash packs, lazy-loaded |
 | `data/roads.json` | road search index, lazy-loaded |
 | `data/d/<year>_<fips>.json` | per-crash case files, loaded per tap |
 | `data/why.json` | national who/why totals by year, loaded on boot |
-| `data/g/<factor>.json` | one factor's heat grid and day × hour totals, loaded per tap |
+| `data/g/<factor>.json` | one factor's coarse grid and day × hour totals, loaded per tap |
 | `data/f/<fips>.json` | who/why flags and hour for each crash in a state pack |
 
 Basemap tiles come from CARTO and OpenFreeMap, place search from
@@ -65,6 +69,7 @@ Everything else is served from this repo.
 python3 scripts/build_data.py     # 2001–2024, downloads FARS zips as needed
 python3 scripts/build_factors.py  # who/why flags from the case files
 python3 scripts/build_tiles.py    # crash dot tiles, with those flags
+python3 scripts/build_heat.py     # the points behind the heat field
 python3 scripts/build_states.py   # state outlines
 ```
 
